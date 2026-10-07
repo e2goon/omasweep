@@ -22,7 +22,7 @@ paths trash "$DATA/Trash/files" "$DATA/Trash/info" "$DATA/Trash/expunged"
 target installers "System" review 0 "Old installers" "packages and disk images in Downloads, untouched for $OMS_STALE_DAYS+ days"
 
 scan_pacman() {
-  command -v paccache >/dev/null 2>&1 || return 1
+  have paccache || return 1
   SCAN_BYTES=$(($(paccache_saved -dk"$OMS_PACMAN_KEEP") + $(paccache_saved -duk0) - $(paccache_saved -duk"$OMS_PACMAN_KEEP")))
   ((SCAN_BYTES >= 0)) || SCAN_BYTES=0
 }
@@ -80,7 +80,7 @@ clean_coredumps() {
 }
 
 scan_flatpak-unused() {
-  command -v flatpak >/dev/null 2>&1 || return 1
+  have flatpak || return 1
   [[ -n $(flatpak list --runtime --columns=application 2>/dev/null) ]] || return 1
   SCAN_BYTES=-1
   SCAN_NOTE="runtimes no installed app needs, size known after removal"
@@ -94,7 +94,7 @@ clean_flatpak-unused() {
 ORPHANS=()
 
 scan_orphans() {
-  command -v pacman >/dev/null 2>&1 || return 1
+  have pacman || return 1
   mapfile -t ORPHANS < <(pacman -Qdtq 2>/dev/null)
   ((${#ORPHANS[@]})) || return 1
   SCAN_BYTES=0

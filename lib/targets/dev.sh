@@ -43,7 +43,7 @@ paths composer "$CACHE/composer"
 target ruby "Developer tools" safe 0 "RubyGems and Bundler cache" "downloaded gem archives" "gem bundle"
 paths ruby "$HOME/.gem/ruby/*/cache" "$HOME/.bundle/cache" "$DATA/mise/installs/ruby/*/lib/ruby/gems/*/cache"
 target dotnet "Developer tools" safe 0 "NuGet HTTP cache" "installed packages stay" "dotnet"
-paths dotnet "$DATA/NuGet/http-cache" "$DATA/NuGet/v3-cache" "$HOME/.local/share/NuGet/plugins-cache"
+paths dotnet "$DATA/NuGet/http-cache" "$DATA/NuGet/v3-cache" "$DATA/NuGet/plugins-cache"
 target beam "Developer tools" safe 0 "Hex and rebar3 cache" "Elixir and Erlang downloads" "beam.smp"
 paths beam "$HOME/.hex/packages" "$CACHE/rebar3"
 target jvm-tools "Developer tools" safe 0 "Coursier cache" "Scala and Clojure downloads" "match:coursier"
@@ -67,15 +67,13 @@ target jetbrains "Developer tools" review 0 "JetBrains IDE caches" "indexes rebu
 paths jetbrains "$CACHE/JetBrains"
 
 scan_mise() {
-  command -v mise >/dev/null 2>&1 || return 1
-  local output count list=() path
+  have mise || return 1
+  local output count list=()
   output=$(mise prune --dry-run 2>&1) || return 1
   count=$(grep -c 'is prunable' <<<"$output")
   ((count > 0)) || return 1
-  while IFS= read -r path; do
-    list+=("${path/#\~/$HOME}")
-  done < <(sed -n 's/.*\[dryrun\] *remove \(.*\)$/\1/p' <<<"$output")
-  SCAN_BYTES=$(size_of "${list[@]}")
+  mapfile -t list < <(sed -n 's/.*\[dryrun\] *remove \(.*\)$/\1/p' <<<"$output")
+  SCAN_BYTES=$(size_of "${list[@]/#\~/$HOME}")
   SCAN_NOTE="$(plural "$count" version) no config needs"
 }
 
@@ -84,7 +82,7 @@ clean_mise() {
 }
 
 clean_mise-cache() {
-  if command -v mise >/dev/null 2>&1 && ! protected_inside "$CACHE/mise"; then
+  if have mise && ! protected_inside "$CACHE/mise"; then
     run mise cache clear
   else
     clean_paths mise-cache
@@ -94,20 +92,14 @@ clean_mise-cache() {
 OLD_VERSIONS=()
 
 old_versions() {
-  local dir=$1 link=$2 active top entry previous=""
+  local dir=$1 link=$2 active top others=()
   [[ -d $dir && -L $link ]] || return 0
   active=$(readlink -f "$link")
   [[ -e $active && $active == "$dir"/* ]] || return 0
   top=${active#"$dir"/}
   top=$dir/${top%%/*}
-  while IFS= read -r entry; do
-    [[ $entry == "$top" ]] && continue
-    if [[ -z $previous ]]; then
-      previous=$entry
-      continue
-    fi
-    OLD_VERSIONS+=("$entry")
-  done < <(find "$dir" -mindepth 1 -maxdepth 1 -printf '%T@\t%p\n' 2>/dev/null | sort -rn | cut -f2-)
+  mapfile -t others < <(find "$dir" -mindepth 1 -maxdepth 1 ! -path "$top" -printf '%T@\t%p\n' 2>/dev/null | sort -rn | cut -f2-)
+  OLD_VERSIONS+=("${others[@]:1}")
 }
 
 scan_ai-cli-versions() {
@@ -128,7 +120,7 @@ clean_ai-cli-versions() {
 }
 
 scan_pnpm-store() {
-  command -v pnpm >/dev/null 2>&1 || return 1
+  have pnpm || return 1
   [[ -d $DATA/pnpm/store ]] || return 1
   SCAN_BYTES=-1
   SCAN_NOTE="unreferenced packages only, size known after pruning"
@@ -139,7 +131,7 @@ clean_pnpm-store() {
 }
 
 clean_uv() {
-  if command -v uv >/dev/null 2>&1 && ! protected_inside "$CACHE/uv"; then
+  if have uv && ! protected_inside "$CACHE/uv"; then
     run uv cache prune
   else
     clean_paths uv
@@ -148,7 +140,7 @@ clean_uv() {
 
 go_mod_dir() {
   local dir=""
-  command -v go >/dev/null 2>&1 && dir=$(go env GOMODCACHE 2>/dev/null)
+  have go && dir=$(go env GOMODCACHE 2>/dev/null)
   printf '%s' "${dir:-$HOME/go/pkg/mod}"
 }
 
@@ -162,7 +154,7 @@ scan_go-mod() {
 clean_go-mod() {
   local dir
   dir=$(go_mod_dir)
-  if command -v go >/dev/null 2>&1 && ! protected_inside "$dir"; then
+  if have go && ! protected_inside "$dir"; then
     run go clean -modcache
   else
     clear_contents "$dir"

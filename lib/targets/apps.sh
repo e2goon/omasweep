@@ -36,7 +36,7 @@ discover_app_caches() {
 
 scan_app-caches() {
   scan_paths app-caches || return 1
-  SCAN_NOTE="$(preview_list 3 "${APP_NAMES[@]}")${SCAN_NOTE#"${T_NOTE[app-caches]}"}"
+  SCAN_NOTE=$(preview_list 3 "${APP_NAMES[@]}")
 }
 
 discover_flatpak_caches() {

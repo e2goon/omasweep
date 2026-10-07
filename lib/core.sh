@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
 
-OMS_CONFIG_DIR=${XDG_CONFIG_HOME:-$HOME/.config}/omasweep
-OMS_STATE_DIR=${XDG_STATE_HOME:-$HOME/.local/state}/omasweep
+CACHE=${XDG_CACHE_HOME:-$HOME/.cache}
+DATA=${XDG_DATA_HOME:-$HOME/.local/share}
+CONFIG=${XDG_CONFIG_HOME:-$HOME/.config}
+STATE=${XDG_STATE_HOME:-$HOME/.local/state}
+
+OMS_CONFIG_DIR=$CONFIG/omasweep
+OMS_STATE_DIR=$STATE/omasweep
 OMS_WHITELIST=$OMS_CONFIG_DIR/whitelist
 OMS_OPLOG=$OMS_STATE_DIR/operations.log
 OMS_OPLOG_MAX=5242880
@@ -13,6 +18,10 @@ WHITELIST_MATCHES=()
 DRY_ACTIONS=()
 TEMP_FILES=()
 OPLOG_STATE=new
+
+have() {
+  command -v "$1" >/dev/null 2>&1
+}
 
 debug() {
   [[ $DEBUG == 1 ]] && printf '%s\n' "${C_DIM}  [debug] $*${C_RESET}" >&2

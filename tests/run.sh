@@ -30,6 +30,10 @@ check() {
   if "$@" >/dev/null 2>&1; then ok "$name"; else fail "$name"; fi
 }
 
+target_is() {
+  jq -e --arg id "$1" ".targets[] | select(.id == \$id) | $2" <<<"$json"
+}
+
 called() {
   grep -qxF -- "$1" "$CALLS"
 }
@@ -281,21 +285,21 @@ printf '\nScan\n'
 seed
 json=$(oms scan --json)
 check "scan --json is valid JSON" jq -e '.targets | type == "array"' <<<"$json"
-check "npm size leaves out whitelisted paths" jq -e '.targets[] | select(.id == "npm") | .bytes < 500000 and .bytes > 300000' <<<"$json"
+check "npm size leaves out whitelisted paths" target_is npm '.bytes < 500000 and .bytes > 300000'
 check "whitelisted target is hidden" jq -e '[.targets[] | select(.id == "trash")] | length == 0' <<<"$json"
-check "stale project artifacts are found" jq -e '.targets[] | select(.id == "project-artifacts") | .note | startswith("4 projects:")' <<<"$json"
-check "a tab in a project name keeps the JSON intact" jq -e '.targets[] | select(.id == "project-artifacts") | .note | contains("tab proj")' <<<"$json"
+check "stale project artifacts are found" target_is project-artifacts '.note | startswith("4 projects:")'
+check "a tab in a project name keeps the JSON intact" target_is project-artifacts '.note | contains("tab proj")'
 check "an unreadable folder does not hide the journal" jq -e '[.targets[] | select(.id == "journal")] | length == 1' <<<"$json"
 check "symlinked cache directory is not measured" jq -e '[.targets[] | select(.id == "bun")] | length == 0' <<<"$json"
-check "only the mise version no config needs is counted" jq -e '.targets[] | select(.id == "mise") | .bytes < 300000' <<<"$json"
+check "only the mise version no config needs is counted" target_is mise '.bytes < 300000'
 check "scan leaves no temporary files behind" test -z "$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'omasweep.*' -newer "$CALLS" 2>/dev/null)"
 check "docker sizes come from docker system df" jq -e '[.targets[] | select(.id == "docker-build" or .id == "docker-images") | .bytes] == [2000000000, 1500000000]' <<<"$json"
-check "unused docker images need review" jq -e '.targets[] | select(.id == "docker-images") | .tier == "review"' <<<"$json"
-check "orphans are measured from pacman -Qi" jq -e '.targets[] | select(.id == "orphans") | .bytes == 4194304' <<<"$json"
-check "Electron apps are discovered from ~/.config" jq -e '.targets[] | select(.id == "app-caches") | .note | contains("Obsidian")' <<<"$json"
-check "an app holding its SingletonLock is skipped" jq -e '.targets[] | select(.id == "app-caches") | .note | contains("skipping open: Busy App")' <<<"$json"
+check "unused docker images need review" target_is docker-images '.tier == "review"'
+check "orphans are measured from pacman -Qi" target_is orphans '.bytes == 4194304'
+check "Electron apps are discovered from ~/.config" target_is app-caches '.note | contains("Obsidian")'
+check "an app holding its SingletonLock is skipped" target_is app-caches '.note | contains("skipping open: Busy App")'
 check "an installer with an old mtime but a fresh ctime is not offered" jq -e '[.targets[] | select(.id == "installers")] | length == 0' <<<"$json"
-check "AI CLI keeps the active and previous version" jq -e '.targets[] | select(.id == "ai-cli-versions") | .note | startswith("1 version")' <<<"$json"
+check "AI CLI keeps the active and previous version" target_is ai-cli-versions '.note | startswith("1 version")'
 check "a stray chromium process does not block the browser cache" jq -e '.targets[] | select(.id == "chromium") | .status == "ready"' <<<"$(FAKE_RUNNING=chromium oms scan --json)"
 ln -s "$(hostname)-$$" "$SANDBOX/.config/chromium/SingletonLock"
 check "a running process marks its target busy" jq -e '.targets[] | select(.id == "uv") | .status == "busy"' <<<"$(FAKE_RUNNING=uv oms scan --json)"

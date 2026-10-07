@@ -27,7 +27,7 @@ ui_init() {
 }
 
 has_gum() {
-  [[ $UI_TTY == 1 ]] && command -v gum >/dev/null 2>&1
+  [[ $UI_TTY == 1 ]] && have gum
 }
 
 human_size() {

@@ -14,7 +14,7 @@ engine_df() {
 prefetch_engines() {
   local engine file
   for engine in docker podman; do
-    command -v "$engine" >/dev/null 2>&1 || continue
+    have "$engine" || continue
     file=$(mktemp -t omasweep.XXXXXX) || continue
     TEMP_FILES+=("$file")
     ENGINE_OUT[$engine]=$file
@@ -25,7 +25,7 @@ prefetch_engines() {
 
 engine_ready() {
   local engine=$1
-  command -v "$engine" >/dev/null 2>&1 || return 1
+  have "$engine" || return 1
   if [[ -z ${ENGINE_DF[$engine]+set} ]]; then
     if [[ -n ${ENGINE_JOB[$engine]:-} ]]; then
       wait "${ENGINE_JOB[$engine]}" 2>/dev/null

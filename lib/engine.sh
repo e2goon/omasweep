@@ -18,10 +18,6 @@ validate_settings() {
     die "OMS_JOURNAL_KEEP must look like 2weeks, 30days, or 1month, got '$OMS_JOURNAL_KEEP'"
 }
 
-CACHE=${XDG_CACHE_HOME:-$HOME/.cache}
-DATA=${XDG_DATA_HOME:-$HOME/.local/share}
-CONFIG=${XDG_CONFIG_HOME:-$HOME/.config}
-
 join_by() {
   local separator=$1 out=${2:-}
   shift 2 || return 0
@@ -72,17 +68,17 @@ target() {
   T_BUSY[$id]=${7:-}
 }
 
+app_path() {
+  local id=$1 pattern=$2 name=$3 busy=$4
+  T_PATHS[$id]+="$pattern"$'\t'"$name"$'\t'"$busy"$'\n'
+}
+
 paths() {
   local id=$1 pattern
   shift
   for pattern in "$@"; do
-    T_PATHS[$id]+="$pattern"$'\t\t\n'
+    app_path "$id" "$pattern" "" ""
   done
-}
-
-app_path() {
-  local id=$1 pattern=$2 name=$3 busy=$4
-  T_PATHS[$id]+="$pattern"$'\t'"$name"$'\t'"$busy"$'\n'
 }
 
 lock_token() {
@@ -237,6 +233,7 @@ scan_paths() {
     SCAN_BUSY=$(preview_list 2 "${open[@]}")
     return 0
   fi
+  ((${#open[@]})) && SCAN_OPEN=$(preview_list 2 "${open[@]}")
   SCAN_BYTES=$(size_of "${PATH_LIST[@]}")
   for path in "${PATH_LIST[@]}"; do
     for match in "${WHITELIST_MATCHES[@]}"; do
@@ -245,9 +242,6 @@ scan_paths() {
   done
   ((${#kept[@]})) && SCAN_BYTES=$((SCAN_BYTES - $(size_of "${kept[@]}")))
   ((SCAN_BYTES >= 0)) || SCAN_BYTES=0
-  if ((${#open[@]})); then
-    SCAN_NOTE="${SCAN_NOTE:+$SCAN_NOTE · }skipping open: $(preview_list 2 "${open[@]}")"
-  fi
   return 0
 }
 
@@ -266,6 +260,7 @@ scan_target() {
   SCAN_BYTES=0
   SCAN_NOTE=${T_NOTE[$id]}
   SCAN_BUSY=""
+  SCAN_OPEN=""
   target_whitelisted "$id" && return 1
   if declare -F "scan_$id" >/dev/null; then
     "scan_$id" || return 1
@@ -282,6 +277,7 @@ scan_target() {
     return 1
   else
     R_STATUS[$id]=ready
+    [[ -n $SCAN_OPEN ]] && SCAN_NOTE="${SCAN_NOTE:+$SCAN_NOTE · }skipping open: $SCAN_OPEN"
   fi
   R_BYTES[$id]=$SCAN_BYTES
   R_NOTE[$id]=${SCAN_NOTE//[$'\t\n']/ }

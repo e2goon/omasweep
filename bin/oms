@@ -66,10 +66,44 @@ on_interrupt() {
 target_list() {
   local option=$1 value=$2 id
   [[ -n $value ]] || die "$option needs at least one target ID (see oms scan)"
-  IFS=, read -r -a SPLIT <<<"$value"
-  for id in "${SPLIT[@]}"; do
+  IFS=, read -r -a TARGET_LIST <<<"$value"
+  for id in "${TARGET_LIST[@]}"; do
     [[ -n $id && -n ${T_LABEL[$id]:-} ]] || die "Unknown target in $option: '$id' (see oms scan)"
   done
+}
+
+in_list() {
+  local item=$1 entry
+  shift
+  for entry in "$@"; do
+    [[ $entry == "$item" ]] && return 0
+  done
+  return 1
+}
+
+size_label() {
+  local id=$1 unknown=${2:-unknown}
+  if ((${R_BYTES[$id]} < 0)); then
+    printf '%s' "$unknown"
+  else
+    human_size "${R_BYTES[$id]}"
+  fi
+}
+
+sum_bytes() {
+  local id total=0
+  for id in "$@"; do
+    ((${R_BYTES[$id]} > 0)) && total=$((total + ${R_BYTES[$id]}))
+  done
+  printf '%s' "$total"
+}
+
+safe_ids() {
+  local id
+  for id in "${SCANNED[@]}"; do
+    [[ ${R_STATUS[$id]} == ready && ${T_TIER[$id]} == safe ]] && printf '%s\n' "$id"
+  done
+  return 0
 }
 
 scan_all() {
@@ -88,8 +122,7 @@ row() {
   local index=$1 id=$2 mark=$3 label size plain admin="     " detail room
   label=$(pad_right "${T_LABEL[$id]}" 26)
   size=$(color_size "${R_BYTES[$id]}")
-  plain=$(human_size "${R_BYTES[$id]}")
-  ((${R_BYTES[$id]} < 0)) && plain="unknown"
+  plain=$(size_label "$id")
   [[ ${T_SUDO[$id]} == 1 ]] && admin=" ${C_YELLOW}sudo${C_RESET}"
   detail=${R_NOTE[$id]:-${T_SECTION[$id]}}
   room=$((TERM_COLS - 51))
@@ -107,71 +140,68 @@ row() {
 RANKED=()
 NUMBERED=()
 
-show_table() {
-  mapfile -t RANKED < <(ranked_targets)
-  NUMBERED=()
-  local id safe_total=0 shown_safe=0 shown_review=0 shown_busy=0 n=0
+table_rows() {
+  local title=$1 status=$2 tier=$3 mark=$4 id shown=0
   for id in "${RANKED[@]}"; do
-    [[ ${R_STATUS[$id]} == ready && ${T_TIER[$id]} == safe ]] && ((${R_BYTES[$id]} > 0)) && safe_total=$((safe_total + ${R_BYTES[$id]}))
+    [[ ${R_STATUS[$id]} == "$status" ]] || continue
+    [[ -z $tier || ${T_TIER[$id]} == "$tier" ]] || continue
+    ((shown++)) || section "$title"
+    if [[ $status == ready ]]; then
+      NUMBERED+=("$id")
+      row "${#NUMBERED[@]}" "$id" "$mark"
+    else
+      row "" "$id" "$mark"
+    fi
   done
+}
 
-  for id in "${RANKED[@]}"; do
-    [[ ${R_STATUS[$id]} == ready && ${T_TIER[$id]} == safe ]] || continue
-    ((shown_safe++)) || section "Safe to sweep · $(human_size "$safe_total")"
-    n=$((n + 1))
-    NUMBERED+=("$id")
-    row "$n" "$id" "${C_GREEN}${GLYPH_ON}${C_RESET}"
-  done
-  for id in "${RANKED[@]}"; do
-    [[ ${R_STATUS[$id]} == ready && ${T_TIER[$id]} == review ]] || continue
-    ((shown_review++)) || section "Review first"
-    n=$((n + 1))
-    NUMBERED+=("$id")
-    row "$n" "$id" "${C_YELLOW}${GLYPH_OFF}${C_RESET}"
-  done
-  for id in "${RANKED[@]}"; do
-    [[ ${R_STATUS[$id]} == busy ]] || continue
-    ((shown_busy++)) || section "Skipped while in use"
-    row "" "$id" "${C_DIM}${GLYPH_OFF}${C_RESET}"
-  done
-  if ((n > 0)); then
+show_table() {
+  local safe=()
+  mapfile -t RANKED < <(ranked_targets)
+  mapfile -t safe < <(safe_ids)
+  NUMBERED=()
+  table_rows "Safe to sweep · $(human_size "$(sum_bytes "${safe[@]}")")" ready safe "${C_GREEN}${GLYPH_ON}${C_RESET}"
+  table_rows "Review first" ready review "${C_YELLOW}${GLYPH_OFF}${C_RESET}"
+  table_rows "Skipped while in use" busy "" "${C_DIM}${GLYPH_OFF}${C_RESET}"
+  if ((${#NUMBERED[@]})); then
     printf '\n  %s\n' "${C_GREEN}${GLYPH_ON}${C_RESET}${C_DIM} preselected   ${C_RESET}${C_YELLOW}${GLYPH_OFF}${C_RESET}${C_DIM} opt-in   ${C_RESET}${C_YELLOW}sudo${C_RESET}${C_DIM} asks for your password${C_RESET}"
   fi
+}
+
+nothing_to_sweep() {
+  ((${#NUMBERED[@]} == 0)) || return 1
+  printf '\n  %s\n' "${C_GREEN}${GLYPH_OK}${C_RESET} Nothing to sweep. Your system is already tidy."
 }
 
 SELECTED=()
 
 default_selection() {
-  local all=$1 id
+  local id
   SELECTED=()
   for id in "${NUMBERED[@]}"; do
-    if [[ $all == 1 || ${T_TIER[$id]} == safe ]]; then
+    if [[ $CLEAN_ALL == 1 || ${T_TIER[$id]} == safe ]]; then
       SELECTED+=("$id")
     fi
   done
 }
 
 apply_filters() {
-  local only=$1 skip=$2 id keep=()
-  if [[ -n $only ]]; then
+  local id keep=()
+  if ((${#ONLY_IDS[@]})); then
     SELECTED=()
     for id in "${NUMBERED[@]}"; do
-      [[ ",$only," == *",$id,"* ]] && SELECTED+=("$id")
+      in_list "$id" "${ONLY_IDS[@]}" && SELECTED+=("$id")
     done
   fi
-  if [[ -n $skip ]]; then
-    for id in "${SELECTED[@]}"; do
-      [[ ",$skip," == *",$id,"* ]] || keep+=("$id")
-    done
-    SELECTED=("${keep[@]}")
-  fi
+  for id in "${SELECTED[@]}"; do
+    in_list "$id" "${SKIP_IDS[@]}" || keep+=("$id")
+  done
+  SELECTED=("${keep[@]}")
 }
 
 pick_label() {
-  local index=$1 id=$2 plain
-  plain=$(human_size "${R_BYTES[$id]}")
-  ((${R_BYTES[$id]} < 0)) && plain="unknown"
-  printf '%2d  %s %9s' "$index" "$(pad_right "${T_LABEL[$id]}" 26)" "$plain"
+  local index=$1 id=$2
+  printf '%2d  %s %9s' "$index" "$(pad_right "${T_LABEL[$id]}" 26)" "$(size_label "$id")"
   [[ ${T_SUDO[$id]} == 1 ]] && printf '  sudo'
   [[ ${T_TIER[$id]} == review ]] && printf '  review'
   return 0
@@ -183,18 +213,14 @@ pick_interactive() {
     n=$((n + 1))
     label=$(pick_label "$n" "$id")
     options+=("$label|$id")
-    [[ " ${SELECTED[*]} " == *" $id "* ]] && preselect+=("$label")
+    in_list "$id" "${SELECTED[@]}" && preselect+=("$label")
   done
 
   if has_gum; then
-    local IFS_SAVE=$IFS selected_csv
-    IFS=,
-    selected_csv="${preselect[*]}"
-    IFS=$IFS_SAVE
     printf '\n'
     choice=$(gum choose --no-limit --ordered --height=$((${#options[@]} + 2)) \
       --header="Pick what to sweep" \
-      --label-delimiter="|" --selected="$selected_csv" "${options[@]}") || return 1
+      --label-delimiter="|" --selected="$(join_by , "${preselect[@]}")" "${options[@]}") || return 1
     mapfile -t SELECTED <<<"$choice"
     [[ -n ${SELECTED[0]:-} ]] || SELECTED=()
     return 0
@@ -217,14 +243,6 @@ pick_interactive() {
     ((n >= 1 && n <= ${#NUMBERED[@]})) && SELECTED+=("${NUMBERED[n - 1]}")
   done
   return 0
-}
-
-selection_bytes() {
-  local id total=0
-  for id in "${SELECTED[@]}"; do
-    ((${R_BYTES[$id]} > 0)) && total=$((total + ${R_BYTES[$id]}))
-  done
-  printf '%s' "$total"
 }
 
 ensure_sudo() {
@@ -256,6 +274,11 @@ SWEPT_BYTES=0
 SWEPT_COUNT=0
 FAILED=()
 
+report() {
+  local glyph=$1 id=$2 detail=$3 suffix=${4:-}
+  printf '  %s %s %s%s\n' "$glyph" "${T_LABEL[$id]}" "${C_DIM}· ${detail}${C_RESET}" "${suffix:+ $suffix}"
+}
+
 sweep() {
   local id status bytes size_text
   if [[ $DRY_RUN == 1 ]]; then
@@ -272,25 +295,24 @@ sweep() {
     status=$?
     spin_stop
     bytes=${R_BYTES[$id]}
-    size_text=$(human_size "$bytes")
-    ((bytes < 0)) && size_text="size unknown"
+    size_text=$(size_label "$id" "size unknown")
     if ((CLEAN_SKIPPED)); then
-      printf '  %s %s %s\n' "${C_YELLOW}${GLYPH_OFF}${C_RESET}" "${T_LABEL[$id]}" "${C_DIM}· skipped, $(busy_label "${T_BUSY[$id]}") opened since the scan${C_RESET}"
+      report "${C_YELLOW}${GLYPH_OFF}${C_RESET}" "$id" "skipped, $(busy_label "${T_BUSY[$id]}") opened since the scan"
       continue
     fi
     if ((status != 0)); then
       FAILED+=("$id")
-      printf '  %s %s %s\n' "${C_RED}${GLYPH_FAIL}${C_RESET}" "${T_LABEL[$id]}" "${C_DIM}· failed, see oms log${C_RESET}"
+      report "${C_RED}${GLYPH_FAIL}${C_RESET}" "$id" "failed, see oms log"
       continue
     fi
     SWEPT_COUNT=$((SWEPT_COUNT + 1))
     ((bytes > 0)) && SWEPT_BYTES=$((SWEPT_BYTES + bytes))
     oplog "SWEPT $id ($size_text)"
     if [[ $DRY_RUN == 1 ]]; then
-      printf '  %s %s %s %s\n' "${C_YELLOW}${GLYPH_DRY}${C_RESET}" "${T_LABEL[$id]}" "${C_DIM}· ${size_text}${C_RESET}" "${C_YELLOW}dry${C_RESET}"
+      report "${C_YELLOW}${GLYPH_DRY}${C_RESET}" "$id" "$size_text" "${C_YELLOW}dry${C_RESET}"
       dry_actions
     else
-      printf '  %s %s %s\n' "${C_GREEN}${GLYPH_OK}${C_RESET}" "${T_LABEL[$id]}" "${C_DIM}· ${size_text}${C_RESET}"
+      report "${C_GREEN}${GLYPH_OK}${C_RESET}" "$id" "$size_text"
     fi
   done
   cursor_show
@@ -347,7 +369,7 @@ summary() {
 
 hold() {
   [[ $HOLD == 1 ]] || return 0
-  if command -v omarchy-show-done >/dev/null 2>&1; then
+  if have omarchy-show-done; then
     omarchy-show-done
   else
     printf '\n%s' "${C_GREEN}${GLYPH_ON}${C_RESET} Done! Press any key to close..."
@@ -361,35 +383,80 @@ finish() {
   exit "${1:-0}"
 }
 
-cmd_clean() {
-  local yes=0 all=0 only="" skip=""
+CLEAN_YES=0
+CLEAN_ALL=0
+ONLY_IDS=()
+SKIP_IDS=()
+
+parse_clean_args() {
   HOLD=0
   while (($#)); do
     case $1 in
       -n | --dry-run) DRY_RUN=1 ;;
-      -y | --yes) yes=1 ;;
-      -a | --all) all=1 ;;
+      -y | --yes) CLEAN_YES=1 ;;
+      -a | --all) CLEAN_ALL=1 ;;
       --only | --skip)
         (($# >= 2)) || die "$1 needs at least one target ID (see oms scan)"
-        target_list "$1" "$2"
-        if [[ $1 == --only ]]; then only=$2; else skip=$2; fi
+        set_target_list "$1" "$2"
         shift
         ;;
-      --only=* | --skip=*)
-        target_list "${1%%=*}" "${1#*=}"
-        if [[ $1 == --only=* ]]; then only=${1#*=}; else skip=${1#*=}; fi
-        ;;
+      --only=* | --skip=*) set_target_list "${1%%=*}" "${1#*=}" ;;
       --debug) DEBUG=1 ;;
       --hold) HOLD=1 ;;
-      -h | --help) usage; exit 0 ;;
+      -h | --help)
+        usage
+        exit 0
+        ;;
       *) die "Unknown option for oms clean: $1 (see oms help)" ;;
     esac
     shift
   done
+}
 
+set_target_list() {
+  target_list "$1" "$2"
+  if [[ $1 == --only ]]; then
+    ONLY_IDS=("${TARGET_LIST[@]}")
+  else
+    SKIP_IDS=("${TARGET_LIST[@]}")
+  fi
+}
+
+choose_targets() {
+  default_selection
+  apply_filters
+  if [[ $CLEAN_YES == 0 && ${#ONLY_IDS[@]} == 0 && $INTERACTIVE == 1 ]] && ! pick_interactive; then
+    printf '\n'
+    note "Cancelled. Nothing was touched."
+    return 1
+  fi
+  if ((${#SELECTED[@]} == 0)); then
+    printf '\n'
+    note "Nothing selected. Nothing was touched."
+    return 1
+  fi
+  if [[ $CLEAN_YES == 1 && $CLEAN_ALL == 1 ]]; then
+    local id review=()
+    for id in "${SELECTED[@]}"; do
+      [[ ${T_TIER[$id]} == review ]] && review+=("${T_LABEL[$id]}")
+    done
+    ((${#review[@]})) && warn "--all --yes includes review items: $(join_by ", " "${review[@]}")"
+  fi
+  if [[ $CLEAN_YES == 0 && $DRY_RUN == 0 ]]; then
+    printf '\n'
+    if ! confirm "Sweep ${#SELECTED[@]} items ($(human_size "$(sum_bytes "${SELECTED[@]}")"))?"; then
+      note "Cancelled. Nothing was touched."
+      return 1
+    fi
+  fi
+  return 0
+}
+
+cmd_clean() {
+  parse_clean_args "$@"
   INTERACTIVE=0
   [[ -t 0 && -t 1 ]] && INTERACTIVE=1
-  if [[ $INTERACTIVE == 0 && $yes == 0 && $DRY_RUN == 0 ]]; then
+  if [[ $INTERACTIVE == 0 && $CLEAN_YES == 0 && $DRY_RUN == 0 ]]; then
     die "No terminal to confirm in. Pass --yes to sweep the safe items, or --dry-run to preview."
   fi
 
@@ -404,41 +471,8 @@ cmd_clean() {
 
   scan_all
   show_table
-  if ((${#NUMBERED[@]} == 0)); then
-    printf '\n  %s\n' "${C_GREEN}${GLYPH_OK}${C_RESET} Nothing to sweep. Your system is already tidy."
-    finish 0
-  fi
-
-  default_selection "$all"
-  apply_filters "$only" "$skip"
-  if [[ $yes == 0 && -z $only && $INTERACTIVE == 1 ]]; then
-    pick_interactive || {
-      printf '\n'
-      note "Cancelled. Nothing was touched."
-      finish 0
-    }
-  fi
-  if ((${#SELECTED[@]} == 0)); then
-    printf '\n'
-    note "Nothing selected. Nothing was touched."
-    finish 0
-  fi
-  if [[ $yes == 1 && $all == 1 ]]; then
-    local id review=()
-    for id in "${SELECTED[@]}"; do
-      [[ ${T_TIER[$id]} == review ]] && review+=("${T_LABEL[$id]}")
-    done
-    ((${#review[@]})) && warn "--all --yes includes review items: $(join_by ", " "${review[@]}")"
-  fi
-
-  if [[ $yes == 0 && $DRY_RUN == 0 ]]; then
-    printf '\n'
-    confirm "Sweep ${#SELECTED[@]} items ($(human_size "$(selection_bytes)"))?" || {
-      note "Cancelled. Nothing was touched."
-      finish 0
-    }
-  fi
-
+  nothing_to_sweep && finish 0
+  choose_targets || finish 0
   ensure_sudo
   ((${#SELECTED[@]})) || finish 0
   sweep
@@ -448,14 +482,12 @@ cmd_clean() {
 }
 
 json_scan() {
-  local id safe=0
-  for id in "${SCANNED[@]}"; do
-    [[ ${R_STATUS[$id]} == ready && ${T_TIER[$id]} == safe ]] && ((${R_BYTES[$id]} > 0)) && safe=$((safe + ${R_BYTES[$id]}))
-  done
+  local id safe=()
+  mapfile -t safe < <(safe_ids)
   ranked_targets | while IFS= read -r id; do
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$id" "${T_LABEL[$id]}" "${T_SECTION[$id]}" "${T_TIER[$id]}" \
       "${T_SUDO[$id]}" "${R_BYTES[$id]}" "${R_STATUS[$id]}" "${R_NOTE[$id]}"
-  done | jq -Rn --argjson safe "$safe" --argjson free "$(free_bytes)" --arg version "$OMS_VERSION" '
+  done | jq -Rn --argjson safe "$(sum_bytes "${safe[@]}")" --argjson free "$(free_bytes)" --arg version "$OMS_VERSION" '
     {
       version: $version,
       freeBytes: $free,
@@ -473,13 +505,16 @@ cmd_scan() {
     case $1 in
       --json) json=1 ;;
       --debug) DEBUG=1 ;;
-      -h | --help) usage; exit 0 ;;
+      -h | --help)
+        usage
+        exit 0
+        ;;
       *) die "Unknown option for oms scan: $1" ;;
     esac
     shift
   done
   if [[ $json == 1 ]]; then
-    command -v jq >/dev/null 2>&1 || die "oms scan --json needs jq"
+    have jq || die "oms scan --json needs jq"
     UI_TTY=0
     scan_all
     json_scan
@@ -488,14 +523,9 @@ cmd_scan() {
   banner "Sweep your Omarchy · v${OMS_VERSION}"
   scan_all
   show_table
-  if ((${#NUMBERED[@]} == 0)); then
-    printf '\n  %s\n' "${C_GREEN}${GLYPH_OK}${C_RESET} Nothing to sweep. Your system is already tidy."
-    return
-  fi
+  nothing_to_sweep && return
   printf '\n'
-  local id ids=()
-  for id in "${NUMBERED[@]}"; do ids+=("$id"); done
-  note "IDs: $(join_by " " "${ids[@]}")"
+  note "IDs: $(join_by " " "${NUMBERED[@]}")"
   note "Run oms to pick and sweep, or oms clean --only ID,ID"
 }
 
