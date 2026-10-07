@@ -49,6 +49,14 @@ oms() {
     "$OMS" "$@"
 }
 
+rejects() {
+  ! oms "$@" </dev/null >/dev/null 2>&1
+}
+
+prints_version() {
+  oms "$1" | grep -q '^omasweep '
+}
+
 stub() {
   {
     printf '#!/usr/bin/env bash\n'
@@ -351,7 +359,7 @@ check "user caches are still swept" test ! -e "$SANDBOX/.cache/thumbnails/large"
 
 printf '\nGuards\n'
 seed
-check "a malformed OMS_STALE_DAYS stops the run" bash -c "! OMS_STALE_DAYS=30d '$OMS' scan --json"
+OMS_STALE_DAYS=30d check "a malformed OMS_STALE_DAYS stops the run" rejects scan --json
 OMS_STALE_DAYS=30d oms clean --yes --all >/dev/null 2>&1
 check "nothing is removed after a malformed setting" test -d "$SANDBOX/Work/old/node_modules"
 seed
@@ -361,8 +369,15 @@ blob "$OUTSIDE/cache/thumbnails/x/f" 10
 env HOME="$SANDBOX" PATH="$STUBS:$PATH" XDG_CACHE_HOME="$OUTSIDE/cache" XDG_STATE_HOME="$SANDBOX/.local/state" \
   OMS_TEST_CALLS="$CALLS" "$OMS" clean --yes --only thumbnails >/dev/null 2>&1
 check "caches outside HOME are refused" test -f "$OUTSIDE/cache/thumbnails/x/f"
-check "unknown target is rejected" bash -c "! env HOME='$SANDBOX' '$OMS' clean --yes --only nope"
-check "sweeping without a terminal needs --yes" bash -c "! env HOME='$SANDBOX' '$OMS' clean </dev/null"
+check "unknown target is rejected" rejects clean --yes --only nope
+check "--only without IDs is rejected" rejects clean --yes --only
+check "--only with an empty value is rejected" rejects clean --yes --only ''
+check "an empty ID in a list is rejected" rejects clean --yes --only thumbnails,,npm
+check "--skip= with an unknown ID is rejected" rejects clean --yes --skip=nope
+check "sweeping without a terminal needs --yes" rejects clean
+check "rejected runs touch nothing" test ! -s "$CALLS" -a -f "$SANDBOX/.cache/thumbnails/large/a.png"
+check "--version prints the version" prints_version --version
+check "-v prints the version" prints_version -v
 
 printf '\n%d passed, %d failed\n' "$passed" "$failed"
 ((failed == 0))

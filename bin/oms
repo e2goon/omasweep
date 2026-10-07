@@ -62,9 +62,13 @@ on_interrupt() {
   exit 130
 }
 
-split_ids() {
-  local IFS=,
-  read -r -a SPLIT <<<"$1"
+target_list() {
+  local option=$1 value=$2 id
+  [[ -n $value ]] || die "$option needs at least one target ID (see oms scan)"
+  IFS=, read -r -a SPLIT <<<"$value"
+  for id in "${SPLIT[@]}"; do
+    [[ -n $id && -n ${T_LABEL[$id]:-} ]] || die "Unknown target in $option: '$id' (see oms scan)"
+  done
 }
 
 scan_all() {
@@ -146,12 +150,8 @@ default_selection() {
 }
 
 apply_filters() {
-  local only=$1 skip=$2 id keep=() wanted
+  local only=$1 skip=$2 id keep=()
   if [[ -n $only ]]; then
-    split_ids "$only"
-    for wanted in "${SPLIT[@]}"; do
-      [[ -n ${T_LABEL[$wanted]:-} ]] || die "Unknown target: $wanted (see oms scan)"
-    done
     SELECTED=()
     for id in "${NUMBERED[@]}"; do
       [[ ",$only," == *",$id,"* ]] && SELECTED+=("$id")
@@ -210,8 +210,11 @@ pick_interactive() {
   esac
   SELECTED=()
   for n in ${choice//,/ }; do
-    [[ $n =~ ^[0-9]+$ ]] && ((n >= 1 && n <= ${#NUMBERED[@]})) && SELECTED+=("${NUMBERED[n - 1]}")
+    [[ $n =~ ^[0-9]+$ ]] || continue
+    n=$((10#$n))
+    ((n >= 1 && n <= ${#NUMBERED[@]})) && SELECTED+=("${NUMBERED[n - 1]}")
   done
+  return 0
 }
 
 selection_bytes() {
@@ -364,10 +367,16 @@ cmd_clean() {
       -n | --dry-run) DRY_RUN=1 ;;
       -y | --yes) yes=1 ;;
       -a | --all) all=1 ;;
-      --only) only=${2:-}; shift ;;
-      --only=*) only=${1#*=} ;;
-      --skip) skip=${2:-}; shift ;;
-      --skip=*) skip=${1#*=} ;;
+      --only | --skip)
+        (($# >= 2)) || die "$1 needs at least one target ID (see oms scan)"
+        target_list "$1" "$2"
+        if [[ $1 == --only ]]; then only=$2; else skip=$2; fi
+        shift
+        ;;
+      --only=* | --skip=*)
+        target_list "${1%%=*}" "${1#*=}"
+        if [[ $1 == --only=* ]]; then only=${1#*=}; else skip=${1#*=}; fi
+        ;;
       --debug) DEBUG=1 ;;
       --hold) HOLD=1 ;;
       -h | --help) usage; exit 0 ;;
@@ -411,6 +420,13 @@ cmd_clean() {
     printf '\n'
     note "Nothing selected. Nothing was touched."
     finish 0
+  fi
+  if [[ $yes == 1 && $all == 1 ]]; then
+    local id review=()
+    for id in "${SELECTED[@]}"; do
+      [[ ${T_TIER[$id]} == review ]] && review+=("${T_LABEL[$id]}")
+    done
+    ((${#review[@]})) && warn "--all --yes includes review items: $(join_by ", " "${review[@]}")"
   fi
 
   if [[ $yes == 0 && $DRY_RUN == 0 ]]; then
@@ -506,7 +522,9 @@ EOF
     printf '%s\n' "$OMS_WHITELIST"
     return
   fi
-  "${EDITOR:-nvim}" "$OMS_WHITELIST"
+  local editor=()
+  read -r -a editor <<<"${EDITOR:-nvim}"
+  "${editor[@]}" "$OMS_WHITELIST"
 }
 
 cmd_log() {
@@ -542,11 +560,11 @@ main() {
   load_whitelist
 
   local command=${1:-clean}
-  if [[ $command == -* ]]; then
-    command=clean
-  elif (($#)); then
-    shift
-  fi
+  case $command in
+    --version | -v | --help | -h) ;;
+    -*) command=clean ;;
+    *) (($#)) && shift ;;
+  esac
   case $command in
     clean) cmd_clean "$@" ;;
     scan) cmd_scan "$@" ;;
