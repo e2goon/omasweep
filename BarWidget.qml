@@ -107,7 +107,7 @@ BarWidget {
 
   Process {
     id: scanProc
-    command: [root.omsPath, "scan", "--json"]
+    command: ["nice", "-n", "19", "ionice", "-c", "3", root.omsPath, "scan", "--json"]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: root.acceptScan(text)
