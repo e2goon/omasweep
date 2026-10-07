@@ -121,9 +121,10 @@ clean_ai-cli-versions() {
 
 scan_pnpm-store() {
   have pnpm || return 1
-  [[ -d $DATA/pnpm/store ]] || return 1
-  SCAN_BYTES=-1
-  SCAN_NOTE="unreferenced packages only, size known after pruning"
+  local stores=()
+  mapfile -t stores < <(compgen -G "$DATA/pnpm/store/v*/files")
+  ((${#stores[@]})) || return 1
+  SCAN_BYTES=$(file_bytes "${stores[@]}" -type f -links 1)
 }
 
 clean_pnpm-store() {

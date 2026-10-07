@@ -154,7 +154,7 @@ blob() {
 seed() {
   chmod -R u+w "$SANDBOX" "$OUTSIDE" 2>/dev/null
   rm -rf "$SANDBOX" "$OUTSIDE"
-  mkdir -p "$SANDBOX/.config/omasweep" "$SANDBOX/.local/share/pnpm/store" "$OUTSIDE"
+  mkdir -p "$SANDBOX/.config/omasweep" "$OUTSIDE"
 
   blob "$SANDBOX/.npm/_cacache/content/blob" 400000
   chmod 444 "$SANDBOX/.npm/_cacache/content/blob"
@@ -170,6 +170,10 @@ seed() {
   touch -d '90 days ago' "$SANDBOX/Work/old/node_modules/pkg/index.js" "$SANDBOX/Work/old/node_modules/pkg" \
     "$SANDBOX/Work/old/node_modules" "$SANDBOX/Work/old"
   blob "$SANDBOX/Work/new/node_modules/pkg/index.js" 10
+  blob "$SANDBOX/.local/share/pnpm/store/v11/files/00/unused" 300000
+  blob "$SANDBOX/.local/share/pnpm/store/v11/files/01/linked" 200000
+  blob "$SANDBOX/.local/share/pnpm/store/v11/index.db" 50000
+  ln "$SANDBOX/.local/share/pnpm/store/v11/files/01/linked" "$SANDBOX/Work/new/node_modules/pkg/linked.js"
   blob "$SANDBOX/journal/abc/system@0001.journal" 100000
   touch -d '60 days ago' "$SANDBOX/journal/abc/system@0001.journal"
   mkdir -p "$SANDBOX/journal/locked"
@@ -305,6 +309,10 @@ ln -s "$(hostname)-$$" "$SANDBOX/.config/chromium/SingletonLock"
 check "a running process marks its target busy" jq -e '.targets[] | select(.id == "uv") | .status == "busy"' <<<"$(FAKE_RUNNING=uv oms scan --json)"
 check "a matching command line marks its target busy" jq -e '.targets[] | select(.id == "gradle") | .status == "busy"' <<<"$(FAKE_ARGS="java org.gradle.launcher.daemon.bootstrap.GradleDaemon 8.10" oms scan --json)"
 check "browser cache is skipped while its profile is open" jq -e '.targets[] | select(.id == "chromium") | .status == "busy"' <<<"$(oms scan --json)"
+
+check "pnpm store counts only files no project links to" target_is pnpm-store '.bytes == 300000'
+rm "$SANDBOX/.local/share/pnpm/store/v11/files/00/unused"
+check "a pnpm store fully linked to projects is not offered" jq -e '[.targets[] | select(.id == "pnpm-store")] | length == 0' <<<"$(oms scan --json)"
 
 printf '\nDry run\n'
 seed
