@@ -181,6 +181,7 @@ scan_orphans() {
   done < <(LC_ALL=C pacman -Qi "${ORPHANS[@]}" 2>/dev/null | sed -n 's/^Installed Size *: *//p')
   SCAN_NOTE="$(plural ${#ORPHANS[@]} package): $(join_by ", " "${ORPHANS[@]:0:4}")"
   ((${#ORPHANS[@]} > 4)) && SCAN_NOTE+=" +$((${#ORPHANS[@]} - 4)) more"
+  return 0
 }
 
 clean_orphans() {

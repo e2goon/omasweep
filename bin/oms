@@ -124,7 +124,9 @@ show_table() {
     ((shown_busy++)) || section "Skipped while in use"
     row "" "$id" "${C_DIM}${GLYPH_OFF}${C_RESET}"
   done
-  ((n > 0)) && printf '\n  %s\n' "${C_GREEN}${GLYPH_ON}${C_RESET}${C_DIM} preselected   ${C_RESET}${C_YELLOW}${GLYPH_OFF}${C_RESET}${C_DIM} opt-in   ${C_RESET}${C_YELLOW}sudo${C_RESET}${C_DIM} asks for your password${C_RESET}"
+  if ((n > 0)); then
+    printf '\n  %s\n' "${C_GREEN}${GLYPH_ON}${C_RESET}${C_DIM} preselected   ${C_RESET}${C_YELLOW}${GLYPH_OFF}${C_RESET}${C_DIM} opt-in   ${C_RESET}${C_YELLOW}sudo${C_RESET}${C_DIM} asks for your password${C_RESET}"
+  fi
 }
 
 SELECTED=()
