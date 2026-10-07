@@ -47,7 +47,7 @@ BarWidget {
 
   function humanSize(bytes) {
     var value = Number(bytes)
-    if (!isFinite(value) || value < 0) return "?"
+    if (!isFinite(value) || value < 0) return "unknown"
     if (value === 0) return "0 B"
     var units = ["B", "KB", "MB", "GB", "TB"]
     var i = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1)
@@ -246,7 +246,8 @@ BarWidget {
               id: rowSize
               anchors.right: parent.right
               text: root.humanSize(targetRow.modelData.bytes)
-              color: targetRow.modelData.bytes >= 1073741824 ? Color.accent : root.bar.foreground
+              color: targetRow.modelData.bytes < 0 ? root.dim
+                : targetRow.modelData.bytes >= 1073741824 ? Color.accent : root.bar.foreground
               font.family: root.bar.fontFamily
               font.pixelSize: Style.font.body
               font.bold: targetRow.modelData.bytes >= 1073741824
