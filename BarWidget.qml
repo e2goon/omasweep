@@ -12,6 +12,7 @@ BarWidget {
   property bool scanning: false
   property bool scanned: false
   property bool failed: false
+  property bool popoutSwitchClosing: false
   property real safeBytes: 0
   property real freeBytes: 0
   property var targets: []
@@ -32,6 +33,11 @@ BarWidget {
   function open() { popupOpen = true; scan() }
   function close() { popupOpen = false }
   function toggle() { popupOpen ? close() : open() }
+  function closeForPopoutSwitch() {
+    popoutSwitchClosing = true
+    close()
+    Qt.callLater(function() { popoutSwitchClosing = false })
+  }
 
   function humanSize(bytes) {
     var value = Number(bytes)
