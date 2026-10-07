@@ -206,10 +206,13 @@ clean_mise() {
   run mise prune -y
 }
 
+DOCKER_DF=""
+
 docker_reclaimable() {
   docker_ready || return 1
   local value
-  value=$(timeout 20 docker system df --format '{{.Type}}\t{{.Reclaimable}}' 2>/dev/null | awk -F'\t' -v t="$1" '$1 == t { print $2 }')
+  [[ -n $DOCKER_DF ]] || DOCKER_DF=$(timeout 20 docker system df --format '{{.Type}}\t{{.Reclaimable}}' 2>/dev/null)
+  value=$(awk -F'\t' -v t="$1" '$1 == t { print $2 }' <<<"$DOCKER_DF")
   [[ -n $value ]] || return 1
   SCAN_BYTES=$(si_to_bytes "$value")
 }

@@ -272,6 +272,7 @@ sweep() {
     fi
     SWEPT_COUNT=$((SWEPT_COUNT + 1))
     ((bytes > 0)) && SWEPT_BYTES=$((SWEPT_BYTES + bytes))
+    oplog "SWEPT $id ($size_text)"
     if [[ $DRY_RUN == 1 ]]; then
       printf '  %s %s %s %s\n' "${C_YELLOW}${GLYPH_DRY}${C_RESET}" "${T_LABEL[$id]}" "${C_DIM}· ${size_text}${C_RESET}" "${C_YELLOW}dry${C_RESET}"
       dry_actions

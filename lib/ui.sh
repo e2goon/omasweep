@@ -31,13 +31,21 @@ has_gum() {
 }
 
 human_size() {
-  awk -v b="${1:-0}" 'BEGIN {
-    split("B KB MB GB TB", u, " ")
-    i = 1
-    while (b >= 1024 && i < 5) { b /= 1024; i++ }
-    if (i == 1) printf "%d %s", b, u[i]
-    else printf "%.1f %s", b, u[i]
-  }'
+  local bytes=${1:-0} units=(B KB MB GB TB) i=0 scale=1 tenths
+  while ((bytes >= scale * 1024 && i < 4)); do
+    scale=$((scale * 1024))
+    i=$((i + 1))
+  done
+  if ((i == 0)); then
+    printf '%d B' "$bytes"
+    return
+  fi
+  tenths=$(((bytes * 10 + scale / 2) / scale))
+  if ((tenths >= 10240 && i < 4)); then
+    i=$((i + 1))
+    tenths=$((tenths / 1024))
+  fi
+  printf '%d.%d %s' $((tenths / 10)) $((tenths % 10)) "${units[i]}"
 }
 
 color_size() {

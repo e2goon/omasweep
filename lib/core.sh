@@ -166,7 +166,7 @@ clear_contents() {
 }
 
 remove_path() {
-  local path=$1 size
+  local path=$1
   [[ -e $path || -L $path ]] || return 0
   path_safe "$path" || {
     oplog "SKIPPED unsafe path $path"
@@ -181,13 +181,12 @@ remove_path() {
     DRY_ACTIONS+=("rm -rf ${path/#$HOME/\~}")
     return 0
   fi
-  size=$(size_of "$path")
   if rm -rf -- "$path" 2>/dev/null; then
-    oplog "REMOVED $path ($(human_size "$size"))"
+    oplog "REMOVED $path"
   else
     chmod -R u+w -- "$path" 2>/dev/null
     if rm -rf -- "$path" 2>/dev/null; then
-      oplog "REMOVED $path ($(human_size "$size"))"
+      oplog "REMOVED $path"
     else
       oplog "FAILED $path"
       return 1
