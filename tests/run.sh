@@ -191,8 +191,10 @@ check "only the mise version no config needs is counted" jq -e '.targets[] | sel
 check "docker sizes come from docker system df" jq -e '[.targets[] | select(.id == "docker-build" or .id == "docker-images") | .bytes] == [2000000000, 1500000000]' <<<"$json"
 check "unused docker images need review" jq -e '.targets[] | select(.id == "docker-images") | .tier == "review"' <<<"$json"
 check "orphans are measured from pacman -Qi" jq -e '.targets[] | select(.id == "orphans") | .bytes == 4194304' <<<"$json"
-FAKE_RUNNING=chromium json=$(FAKE_RUNNING=chromium oms scan --json)
-check "browser cache is skipped while the browser runs" jq -e '.targets[] | select(.id == "chromium") | .status == "busy"' <<<"$json"
+check "a stray chromium process does not block the browser cache" jq -e '.targets[] | select(.id == "chromium") | .status == "ready"' <<<"$(FAKE_RUNNING=chromium oms scan --json)"
+mkdir -p "$SANDBOX/.config/chromium"
+ln -s "$(hostname)-$$" "$SANDBOX/.config/chromium/SingletonLock"
+check "browser cache is skipped while its profile is open" jq -e '.targets[] | select(.id == "chromium") | .status == "busy"' <<<"$(oms scan --json)"
 
 printf '\nDry run\n'
 seed
@@ -205,7 +207,7 @@ check "dry run writes no log" test ! -e "$SANDBOX/.local/state/omasweep/operatio
 
 printf '\nSweep safe items\n'
 seed
-FAKE_RUNNING=chromium oms clean --yes >/dev/null 2>&1
+oms clean --yes >/dev/null 2>&1
 check "pacman cache keeps two versions" called "paccache -rk2"
 check "uninstalled packages leave the cache" called "paccache -ruk0"
 check "journal is vacuumed through sudo" called "sudo -n journalctl --vacuum-time=4weeks"
@@ -225,7 +227,7 @@ check "thumbnails are emptied" test ! -e "$SANDBOX/.cache/thumbnails/large"
 check "symlink inside a cache is removed as a link" test ! -L "$SANDBOX/.cache/thumbnails/link-dir"
 check "directory a symlink pointed to survives" test -f "$OUTSIDE/victim/keep.txt"
 check "symlinked cache directory is left alone" test -f "$OUTSIDE/bun/cache/pkg"
-check "running browser's cache survives" test -f "$SANDBOX/.cache/chromium/Default/Cache/data"
+check "closed browser's cache is emptied" test ! -e "$SANDBOX/.cache/chromium/Default"
 check "stale node_modules is not swept by default" test -d "$SANDBOX/Work/old/node_modules"
 check "trash is untouched" test -f "$SANDBOX/.local/share/Trash/files/a.txt"
 check "operation log records removals" grep -q REMOVED "$SANDBOX/.local/state/omasweep/operations.log"
