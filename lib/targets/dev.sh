@@ -84,7 +84,7 @@ clean_mise() {
 }
 
 clean_mise-cache() {
-  if command -v mise >/dev/null 2>&1; then
+  if command -v mise >/dev/null 2>&1 && ! protected_inside "$CACHE/mise"; then
     run mise cache clear
   else
     clean_paths mise-cache
@@ -139,7 +139,7 @@ clean_pnpm-store() {
 }
 
 clean_uv() {
-  if command -v uv >/dev/null 2>&1; then
+  if command -v uv >/dev/null 2>&1 && ! protected_inside "$CACHE/uv"; then
     run uv cache prune
   else
     clean_paths uv
@@ -160,9 +160,11 @@ scan_go-mod() {
 }
 
 clean_go-mod() {
-  if command -v go >/dev/null 2>&1; then
+  local dir
+  dir=$(go_mod_dir)
+  if command -v go >/dev/null 2>&1 && ! protected_inside "$dir"; then
     run go clean -modcache
   else
-    remove_path "$(go_mod_dir)"
+    clear_contents "$dir"
   fi
 }

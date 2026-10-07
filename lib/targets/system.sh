@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
 
-JOURNAL_DIR=${OMS_JOURNAL_DIR:-/var/log/journal}
-COREDUMP_DIR=${OMS_COREDUMP_DIR:-/var/lib/systemd/coredump}
-PACMAN_CACHE_DIR=${OMS_PACMAN_CACHE_DIR:-/var/cache/pacman/pkg}
+JOURNAL_DIR=/var/log/journal
+COREDUMP_DIR=/var/lib/systemd/coredump
+PACMAN_CACHE_DIR=/var/cache/pacman/pkg
+if [[ ${OMS_TEST:-} == 1 ]]; then
+  JOURNAL_DIR=${OMS_JOURNAL_DIR:-$JOURNAL_DIR}
+  COREDUMP_DIR=${OMS_COREDUMP_DIR:-$COREDUMP_DIR}
+  PACMAN_CACHE_DIR=${OMS_PACMAN_CACHE_DIR:-$PACMAN_CACHE_DIR}
+fi
 
 target pacman "System" safe 1 "Old package versions" "keeps the newest $OMS_PACMAN_KEEP like omarchy update" "pacman yay paru"
 target pacman-downloads "System" safe 1 "Partial package downloads" "download-* folders pacman left behind" "pacman yay paru"
@@ -18,10 +23,12 @@ target installers "System" review 0 "Old installers" "packages and disk images i
 
 scan_pacman() {
   command -v paccache >/dev/null 2>&1 || return 1
-  local old uninstalled
-  old=$(paccache -c "$PACMAN_CACHE_DIR" -dk"$OMS_PACMAN_KEEP" 2>/dev/null | sed -n 's/.*disk space saved: \(.*\))/\1/p')
-  uninstalled=$(paccache -c "$PACMAN_CACHE_DIR" -duk0 2>/dev/null | sed -n 's/.*disk space saved: \(.*\))/\1/p')
-  SCAN_BYTES=$(($(iec_to_bytes "$old") + $(iec_to_bytes "$uninstalled")))
+  SCAN_BYTES=$(($(paccache_saved -dk"$OMS_PACMAN_KEEP") + $(paccache_saved -duk0) - $(paccache_saved -duk"$OMS_PACMAN_KEEP")))
+  ((SCAN_BYTES >= 0)) || SCAN_BYTES=0
+}
+
+paccache_saved() {
+  iec_to_bytes "$(paccache -c "$PACMAN_CACHE_DIR" "$1" 2>/dev/null | sed -n 's/.*disk space saved: \(.*\))/\1/p')"
 }
 
 clean_pacman() {
@@ -56,8 +63,7 @@ journal_keep_days() {
 
 scan_journal() {
   [[ -d $JOURNAL_DIR ]] || return 1
-  SCAN_BYTES=$(find "$JOURNAL_DIR" -type f -name '*@*.journal*' -mtime +"$(journal_keep_days)" -printf '%s\n' 2>/dev/null |
-    awk '{ s += $1 } END { print s + 0 }')
+  SCAN_BYTES=$(file_bytes "$JOURNAL_DIR" -type f -name '*@*.journal*' -mtime +"$(journal_keep_days)")
 }
 
 clean_journal() {
@@ -66,7 +72,7 @@ clean_journal() {
 
 scan_coredumps() {
   [[ -d $COREDUMP_DIR ]] || return 1
-  SCAN_BYTES=$(find "$COREDUMP_DIR" -type f -printf '%s\n' 2>/dev/null | awk '{ s += $1 } END { print s + 0 }')
+  SCAN_BYTES=$(file_bytes "$COREDUMP_DIR" -type f)
 }
 
 clean_coredumps() {

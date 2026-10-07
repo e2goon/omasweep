@@ -194,6 +194,7 @@ resolve_paths() {
     [[ -n $pattern ]] || continue
     while IFS= read -r match; do
       [[ -n $match && -e $match && ! -L $match ]] || continue
+      path_safe "$match" || continue
       path_covered "$match" && continue
       if [[ -n $busy ]] && busy_spec "$busy"; then
         PATH_SKIPPED+=("${name:-$match}")
@@ -219,8 +220,8 @@ scan_paths() {
     return 0
   fi
   SCAN_BYTES=$(size_of "${PATH_LIST[@]}")
-  for match in "${WHITELIST_MATCHES[@]}"; do
-    for path in "${PATH_LIST[@]}"; do
+  for path in "${PATH_LIST[@]}"; do
+    for match in "${WHITELIST_MATCHES[@]}"; do
       [[ $match == "$path"/* ]] && kept+=("$match")
     done
   done
@@ -265,18 +266,20 @@ scan_target() {
     R_STATUS[$id]=ready
   fi
   R_BYTES[$id]=$SCAN_BYTES
-  R_NOTE[$id]=$SCAN_NOTE
+  R_NOTE[$id]=${SCAN_NOTE//[$'\t\n']/ }
   SCANNED+=("$id")
 }
 
-CLEAN_SKIPPED=3
+CLEAN_SKIPPED=0
 
 clean_target() {
   local id=$1
+  CLEAN_SKIPPED=0
   reset_busy_cache
   if [[ -n ${T_BUSY[$id]} ]] && busy_spec "${T_BUSY[$id]}"; then
     oplog "SKIPPED $id, $(busy_label "${T_BUSY[$id]}") is running"
-    return "$CLEAN_SKIPPED"
+    CLEAN_SKIPPED=1
+    return 0
   fi
   if declare -F "clean_$id" >/dev/null; then
     "clean_$id"

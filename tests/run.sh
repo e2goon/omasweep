@@ -45,7 +45,7 @@ oms() {
     XDG_CONFIG_HOME="$SANDBOX/.config" XDG_STATE_HOME="$SANDBOX/.local/state" \
     OMS_PROJECT_DIRS="$SANDBOX/Work" OMS_JOURNAL_DIR="$SANDBOX/journal" \
     OMS_COREDUMP_DIR="$SANDBOX/coredump" OMS_PACMAN_CACHE_DIR="$SANDBOX/pkg" \
-    OMS_TEST_CALLS="$CALLS" NO_COLOR=1 \
+    OMS_TEST=1 OMS_TEST_CALLS="$CALLS" NO_COLOR=1 \
     "$OMS" "$@"
 }
 
@@ -97,6 +97,7 @@ if [[ "$*" == "prune --dry-run" ]]; then
   echo "mise node@20.0.0 [dryrun]    remove ~/.local/share/mise/installs/node/20.0.0"
 else
   echo "mise $*" >>"$OMS_TEST_CALLS"
+  exit "${FAKE_MISE_EXIT:-0}"
 fi
 EOF
   stub docker <<'EOF'
@@ -167,6 +168,12 @@ seed() {
   blob "$SANDBOX/Work/new/node_modules/pkg/index.js" 10
   blob "$SANDBOX/journal/abc/system@0001.journal" 100000
   touch -d '60 days ago' "$SANDBOX/journal/abc/system@0001.journal"
+  mkdir -p "$SANDBOX/journal/locked"
+  chmod 000 "$SANDBOX/journal/locked"
+  blob "$SANDBOX/.cache/uv/keep/pinned.whl" 10
+  blob "$SANDBOX/Work/tab$(printf '\t')proj/package.json" 10
+  blob "$SANDBOX/Work/tab$(printf '\t')proj/node_modules/pkg/index.js" 10
+  find "$SANDBOX/Work/tab$(printf '\t')proj" -exec touch -h -d '90 days ago' {} +
   blob "$SANDBOX/coredump/core.app.1000.zst" 100000
   blob "$SANDBOX/pkg/download-abc/partial.part" 1000
 
@@ -236,6 +243,7 @@ seed() {
   # indented comment
 ~/.npm/_cacache/keep*
 ~/.cache/thumbnails/*/keep   # keep pinned thumbnails
+~/.cache/uv/keep
 ~/Work/c#app/node_modules
 trash
 EOF
@@ -275,7 +283,9 @@ json=$(oms scan --json)
 check "scan --json is valid JSON" jq -e '.targets | type == "array"' <<<"$json"
 check "npm size leaves out whitelisted paths" jq -e '.targets[] | select(.id == "npm") | .bytes < 500000 and .bytes > 300000' <<<"$json"
 check "whitelisted target is hidden" jq -e '[.targets[] | select(.id == "trash")] | length == 0' <<<"$json"
-check "stale project artifacts are found" jq -e '.targets[] | select(.id == "project-artifacts") | .note | startswith("3 projects:")' <<<"$json"
+check "stale project artifacts are found" jq -e '.targets[] | select(.id == "project-artifacts") | .note | startswith("4 projects:")' <<<"$json"
+check "a tab in a project name keeps the JSON intact" jq -e '.targets[] | select(.id == "project-artifacts") | .note | contains("tab proj")' <<<"$json"
+check "an unreadable folder does not hide the journal" jq -e '[.targets[] | select(.id == "journal")] | length == 1' <<<"$json"
 check "symlinked cache directory is not measured" jq -e '[.targets[] | select(.id == "bun")] | length == 0' <<<"$json"
 check "only the mise version no config needs is counted" jq -e '.targets[] | select(.id == "mise") | .bytes < 300000' <<<"$json"
 check "docker sizes come from docker system df" jq -e '[.targets[] | select(.id == "docker-build" or .id == "docker-images") | .bytes] == [2000000000, 1500000000]' <<<"$json"
@@ -309,7 +319,9 @@ check "journal is vacuumed through sudo" called "sudo -n journalctl --vacuum-tim
 check "crash dumps are removed" test ! -e "$SANDBOX/coredump/core.app.1000.zst"
 check "mise prunes through its own command" called "mise prune -y"
 check "docker build cache is pruned" called "docker builder prune -af"
-check "uv prunes through its own command" called "uv cache prune"
+check "uv cache with a whitelisted path is emptied around it" not_called "uv cache prune"
+check "whitelisted uv path survives" test -f "$SANDBOX/.cache/uv/keep/pinned.whl"
+check "unprotected uv cache is emptied" test ! -e "$SANDBOX/.cache/uv/wheels"
 check "interrupted pacman downloads are removed" test ! -e "$SANDBOX/pkg/download-abc"
 check "unused flatpak runtimes are removed" called "flatpak uninstall --user --unused --noninteractive"
 check "cargo keeps extracted sources" test -f "$SANDBOX/.cargo/registry/src/index/serde/lib.rs"
@@ -365,6 +377,13 @@ seed
 FAKE_REAL_PS=1 oms clean --yes --only huggingface >/dev/null 2>&1
 check "oms does not mistake its own arguments for a running app" test ! -e "$SANDBOX/.cache/huggingface/hub/models--x"
 
+printf '\nFailing tool\n'
+seed
+FAKE_MISE_EXIT=3 oms clean --yes --only mise >"$WORK/out" 2>&1
+status=$?
+check "a tool exiting with 3 is reported as failed" grep -q 'failed, see oms log' "$WORK/out"
+check "a failed sweep exits non-zero" test "$status" -ne 0
+
 printf '\nWithout sudo\n'
 seed
 FAKE_SUDO=deny oms clean --yes >/dev/null 2>&1
@@ -384,6 +403,8 @@ blob "$OUTSIDE/cache/thumbnails/x/f" 10
 env HOME="$SANDBOX" PATH="$STUBS:$PATH" XDG_CACHE_HOME="$OUTSIDE/cache" XDG_STATE_HOME="$SANDBOX/.local/state" \
   OMS_TEST_CALLS="$CALLS" "$OMS" clean --yes --only thumbnails >/dev/null 2>&1
 check "caches outside HOME are refused" test -f "$OUTSIDE/cache/thumbnails/x/f"
+check "caches outside HOME are not offered" jq -e '[.targets[] | select(.id == "thumbnails")] | length == 0' \
+  <<<"$(env HOME="$SANDBOX" PATH="$STUBS:$PATH" XDG_CACHE_HOME="$OUTSIDE/cache" OMS_TEST=1 OMS_TEST_CALLS="$CALLS" "$OMS" scan --json)"
 check "unknown target is rejected" rejects clean --yes --only nope
 check "--only without IDs is rejected" rejects clean --yes --only
 check "--only with an empty value is rejected" rejects clean --yes --only ''

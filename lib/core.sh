@@ -59,12 +59,7 @@ path_covered() {
 }
 
 path_protected() {
-  local path=${1%/} match
-  path_covered "$path" && return 0
-  for match in "${WHITELIST_MATCHES[@]}"; do
-    [[ $match == "$path"/* ]] && return 0
-  done
-  return 1
+  path_covered "$1" || protected_inside "$1"
 }
 
 path_safe() {
@@ -78,15 +73,30 @@ path_safe() {
 }
 
 size_of() {
-  local paths=() path
+  local paths=() path total
   for path in "$@"; do
     [[ -e $path ]] && paths+=("$path")
   done
-  ((${#paths[@]})) || {
-    printf '0'
-    return
-  }
-  du -scB1 -- "${paths[@]}" 2>/dev/null | awk 'END { print $1 + 0 }'
+  if ((${#paths[@]})); then
+    total=$(du -scB1 -- "${paths[@]}" 2>/dev/null)
+    total=${total##*$'\n'}
+    total=${total%%[[:space:]]*}
+  fi
+  printf '%s' "${total:-0}"
+  return 0
+}
+
+file_bytes() {
+  find "$@" -printf '%s\n' 2>/dev/null | awk '{ s += $1 } END { print s + 0 }'
+  return 0
+}
+
+protected_inside() {
+  local dir=${1%/} match
+  for match in "${WHITELIST_MATCHES[@]}"; do
+    [[ $match == "$dir"/* ]] && return 0
+  done
+  return 1
 }
 
 iec_to_bytes() {
@@ -189,7 +199,7 @@ remove_path() {
   if rm -rf -- "$path" 2>/dev/null; then
     oplog "REMOVED $path"
   else
-    chmod -R u+w -- "$path" 2>/dev/null
+    [[ -L $path ]] || chmod -R u+w -- "$path" 2>/dev/null
     if rm -rf -- "$path" 2>/dev/null; then
       oplog "REMOVED $path"
     else

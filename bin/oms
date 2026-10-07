@@ -272,7 +272,7 @@ sweep() {
     bytes=${R_BYTES[$id]}
     size_text=$(human_size "$bytes")
     ((bytes < 0)) && size_text="size unknown"
-    if ((status == CLEAN_SKIPPED)); then
+    if ((CLEAN_SKIPPED)); then
       printf '  %s %s %s\n' "${C_YELLOW}${GLYPH_OFF}${C_RESET}" "${T_LABEL[$id]}" "${C_DIM}· skipped, $(busy_label "${T_BUSY[$id]}") opened since the scan${C_RESET}"
       continue
     fi
