@@ -7,25 +7,9 @@ language Omarchy sets up, browser and Electron app caches, Flatpak, Steam and Wi
 caches, and build output in projects you stopped touching. More than 60 targets, and only the ones
 present on your machine show up.
 
-```
- ┏━┓┏┳┓┏━┓┏━┓╻ ╻┏━╸┏━╸┏━┓
- ┃ ┃┃┃┃┣━┫┗━┓┃╻┃┣╸ ┣╸ ┣━┛
- ┗━┛╹ ╹╹ ╹┗━┛┗┻┛┗━╸┗━╸╹
- Sweep your Omarchy · v0.1.0
-
-➤ Safe to sweep · 18.4 GB
-   1 ● Old mise tool versions        8.7 GB       51 versions no config needs
-   2 ● Docker build cache            6.6 GB       docker builder prune
-   3 ● npm cache                     2.9 GB       downloaded again on install
-   4 ● Old package versions        412.0 MB sudo  keeps the newest 2 like omarchy update
-
-➤ Review first
-   5 ○ Steam shader cache            3.4 GB       rebuilt on next launch with some stutter
-   6 ○ Stale project builds          1.1 GB       2 projects: old-site, demo · node_modules, target
-
-➤ Skipped while in use
-     ○ Chromium cache                1.5 GB       close chromium to include this
-```
+<p align="center">
+  <img src="docs/images/scan.png" alt="oms scan in Ghostty, listing safe items, review items, and caches skipped while their app is open" width="720">
+</p>
 
 ## Highlights
 
@@ -57,6 +41,13 @@ omarchy plugin add https://github.com/e2goon/omasweep.git --enable
 
 The first command installs the widget into the bar. The second links `oms` into `~/.local/bin` so
 you can run it from any terminal. `omarchy plugin update io.github.e2goon.omasweep` updates both.
+
+<p align="center">
+  <img src="docs/images/widget.png" alt="omasweep bar widget popup with the safe total, top items, and Sweep and Preview buttons" width="360">
+</p>
+
+The widget shows how much can be swept safely and the largest items. **Sweep** and **Preview**
+open `oms` in Omarchy's floating terminal, where you pick and confirm every item.
 
 ### CLI only
 
