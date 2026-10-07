@@ -1,0 +1,550 @@
+#!/usr/bin/env bash
+
+set -uo pipefail
+
+OMS_VERSION=0.1.0
+OMS_ROOT=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)
+
+source "$OMS_ROOT/lib/ui.sh"
+source "$OMS_ROOT/lib/core.sh"
+source "$OMS_ROOT/lib/targets.sh"
+
+usage() {
+  cat <<EOF
+${C_BOLD}omasweep${C_RESET} ${OMS_VERSION} · reclaim disk space on Omarchy
+
+${C_BOLD}Usage${C_RESET}
+  oms [clean] [options]   Scan, pick, and sweep
+  oms scan [--json]       Show what can be reclaimed without touching anything
+  oms whitelist           Protect paths or whole targets from sweeping
+  oms log [-f]            Show the operation log
+  oms link                Put oms on your PATH (~/.local/bin/oms)
+  oms help | version
+
+${C_BOLD}Clean options${C_RESET}
+  -n, --dry-run           Preview the sweep, delete nothing
+  -y, --yes               Sweep without asking (safe items unless --all or --only)
+  -a, --all               Preselect review items too
+      --only ID[,ID...]   Sweep only these targets
+      --skip ID[,ID...]   Leave these targets out
+      --debug             Print every command and its output
+      --hold              Wait for a key before exiting (used by the bar widget)
+
+${C_BOLD}Environment${C_RESET}
+  OMS_PACMAN_KEEP=2       Package versions to keep in the pacman cache
+  OMS_JOURNAL_KEEP=4weeks Journal age to keep
+  OMS_STALE_DAYS=30       Days before a project's node_modules counts as stale
+  OMS_PROJECT_DIRS        Colon-separated roots to search for node_modules
+
+Run ${C_BOLD}oms scan${C_RESET} to see target IDs.
+EOF
+}
+
+load_gum_theme() {
+  local helper
+  helper=$(command -v omarchy-restart-gum 2>/dev/null) || return 0
+  source "$helper"
+}
+
+on_exit() {
+  spin_stop
+  cursor_show
+}
+
+on_interrupt() {
+  spin_stop
+  cursor_show
+  printf '\n%s\n' "${C_YELLOW}${GLYPH_NOTE} Sweep cancelled. Nothing else was touched.${C_RESET}"
+  exit 130
+}
+
+split_ids() {
+  local IFS=,
+  read -r -a SPLIT <<<"$1"
+}
+
+scan_all() {
+  local id
+  cursor_hide
+  for id in "${TARGET_IDS[@]}"; do
+    spin_start "Scanning ${T_LABEL[$id]}…"
+    scan_target "$id"
+    spin_stop
+  done
+  cursor_show
+}
+
+row() {
+  local index=$1 id=$2 mark=$3 label size plain admin="     " detail room
+  label=$(pad_right "${T_LABEL[$id]}" 26)
+  size=$(color_size "${R_BYTES[$id]}")
+  plain=$(human_size "${R_BYTES[$id]}")
+  ((${R_BYTES[$id]} < 0)) && plain="unknown"
+  [[ ${T_SUDO[$id]} == 1 ]] && admin=" ${C_YELLOW}sudo${C_RESET}"
+  detail=${R_NOTE[$id]:-${T_SECTION[$id]}}
+  room=$((TERM_COLS - 51))
+  if ((room < 12)); then
+    detail=""
+  elif ((${#detail} > room)); then
+    detail="${detail:0:room-1}…"
+  fi
+  printf '  %s %s %s %*s%s%s  %s\n' \
+    "${C_DIM}$(printf '%2s' "$index")${C_RESET}" "$mark" "$label" \
+    $((9 - ${#plain})) "" "$size" "$admin" \
+    "${C_DIM}${detail}${C_RESET}"
+}
+
+RANKED=()
+NUMBERED=()
+
+show_table() {
+  mapfile -t RANKED < <(ranked_targets)
+  NUMBERED=()
+  local id safe_total=0 shown_safe=0 shown_review=0 shown_busy=0 n=0
+  for id in "${RANKED[@]}"; do
+    [[ ${R_STATUS[$id]} == ready && ${T_TIER[$id]} == safe ]] && ((${R_BYTES[$id]} > 0)) && safe_total=$((safe_total + ${R_BYTES[$id]}))
+  done
+
+  for id in "${RANKED[@]}"; do
+    [[ ${R_STATUS[$id]} == ready && ${T_TIER[$id]} == safe ]] || continue
+    ((shown_safe++)) || section "Safe to sweep · $(human_size "$safe_total")"
+    n=$((n + 1))
+    NUMBERED+=("$id")
+    row "$n" "$id" "${C_GREEN}${GLYPH_ON}${C_RESET}"
+  done
+  for id in "${RANKED[@]}"; do
+    [[ ${R_STATUS[$id]} == ready && ${T_TIER[$id]} == review ]] || continue
+    ((shown_review++)) || section "Review first"
+    n=$((n + 1))
+    NUMBERED+=("$id")
+    row "$n" "$id" "${C_YELLOW}${GLYPH_OFF}${C_RESET}"
+  done
+  for id in "${RANKED[@]}"; do
+    [[ ${R_STATUS[$id]} == busy ]] || continue
+    ((shown_busy++)) || section "Skipped while in use"
+    row "" "$id" "${C_DIM}${GLYPH_OFF}${C_RESET}"
+  done
+  ((n > 0)) && printf '\n  %s\n' "${C_GREEN}${GLYPH_ON}${C_RESET}${C_DIM} preselected   ${C_RESET}${C_YELLOW}${GLYPH_OFF}${C_RESET}${C_DIM} opt-in   ${C_RESET}${C_YELLOW}sudo${C_RESET}${C_DIM} asks for your password${C_RESET}"
+}
+
+SELECTED=()
+
+default_selection() {
+  local all=$1 id
+  SELECTED=()
+  for id in "${NUMBERED[@]}"; do
+    if [[ $all == 1 || ${T_TIER[$id]} == safe ]]; then
+      SELECTED+=("$id")
+    fi
+  done
+}
+
+apply_filters() {
+  local only=$1 skip=$2 id keep=() wanted
+  if [[ -n $only ]]; then
+    split_ids "$only"
+    for wanted in "${SPLIT[@]}"; do
+      [[ -n ${T_LABEL[$wanted]:-} ]] || die "Unknown target: $wanted (see oms scan)"
+    done
+    SELECTED=()
+    for id in "${NUMBERED[@]}"; do
+      [[ ",$only," == *",$id,"* ]] && SELECTED+=("$id")
+    done
+  fi
+  if [[ -n $skip ]]; then
+    for id in "${SELECTED[@]}"; do
+      [[ ",$skip," == *",$id,"* ]] || keep+=("$id")
+    done
+    SELECTED=("${keep[@]}")
+  fi
+}
+
+pick_label() {
+  local index=$1 id=$2 plain
+  plain=$(human_size "${R_BYTES[$id]}")
+  ((${R_BYTES[$id]} < 0)) && plain="unknown"
+  printf '%2d  %s %9s' "$index" "$(pad_right "${T_LABEL[$id]}" 26)" "$plain"
+  [[ ${T_SUDO[$id]} == 1 ]] && printf '  sudo'
+  [[ ${T_TIER[$id]} == review ]] && printf '  review'
+  return 0
+}
+
+pick_interactive() {
+  local options=() preselect=() id n=0 label choice
+  for id in "${NUMBERED[@]}"; do
+    n=$((n + 1))
+    label=$(pick_label "$n" "$id")
+    options+=("$label|$id")
+    [[ " ${SELECTED[*]} " == *" $id "* ]] && preselect+=("$label")
+  done
+
+  if has_gum; then
+    local IFS_SAVE=$IFS selected_csv
+    IFS=,
+    selected_csv="${preselect[*]}"
+    IFS=$IFS_SAVE
+    printf '\n'
+    choice=$(gum choose --no-limit --ordered --height=$((${#options[@]} + 2)) \
+      --header="Pick what to sweep" \
+      --label-delimiter="|" --selected="$selected_csv" "${options[@]}") || return 1
+    mapfile -t SELECTED <<<"$choice"
+    [[ -n ${SELECTED[0]:-} ]] || SELECTED=()
+    return 0
+  fi
+
+  printf '\n%s ' "Numbers to sweep (e.g. 1 2 4), Enter for preselected, a for all, q to quit:"
+  read -r choice </dev/tty || return 1
+  case $choice in
+    "") return 0 ;;
+    q | Q) return 1 ;;
+    a | A)
+      SELECTED=("${NUMBERED[@]}")
+      return 0
+      ;;
+  esac
+  SELECTED=()
+  for n in ${choice//,/ }; do
+    [[ $n =~ ^[0-9]+$ ]] && ((n >= 1 && n <= ${#NUMBERED[@]})) && SELECTED+=("${NUMBERED[n - 1]}")
+  done
+}
+
+selection_bytes() {
+  local id total=0
+  for id in "${SELECTED[@]}"; do
+    ((${R_BYTES[$id]} > 0)) && total=$((total + ${R_BYTES[$id]}))
+  done
+  printf '%s' "$total"
+}
+
+ensure_sudo() {
+  local id needs=() keep=()
+  for id in "${SELECTED[@]}"; do
+    [[ ${T_SUDO[$id]} == 1 ]] && needs+=("${T_LABEL[$id]}")
+  done
+  ((${#needs[@]})) || return 0
+  [[ $DRY_RUN == 1 ]] && return 0
+
+  section "Admin access"
+  printf '  %s\n' "$(join_by ", " "${needs[@]}") ${C_DIM}need${C_RESET} ${C_YELLOW}sudo${C_RESET}"
+  if sudo -n true 2>/dev/null; then
+    printf '  %s\n' "${C_GREEN}${GLYPH_OK}${C_RESET} Admin access already available"
+    return 0
+  fi
+  if [[ $INTERACTIVE == 1 ]] && sudo -v; then
+    printf '  %s\n' "${C_GREEN}${GLYPH_OK}${C_RESET} Admin access granted"
+    return 0
+  fi
+  warn "No admin access. Skipping $(join_by ", " "${needs[@]}")."
+  for id in "${SELECTED[@]}"; do
+    [[ ${T_SUDO[$id]} == 1 ]] || keep+=("$id")
+  done
+  SELECTED=("${keep[@]}")
+}
+
+SWEPT_BYTES=0
+SWEPT_COUNT=0
+FAILED=()
+
+sweep() {
+  local id status bytes size_text
+  if [[ $DRY_RUN == 1 ]]; then
+    section "Preview"
+  else
+    section "Sweeping"
+    oplog "# ===== sweep started · $(join_by "," "${SELECTED[@]}") ====="
+  fi
+  cursor_hide
+  for id in "${SELECTED[@]}"; do
+    DRY_ACTIONS=()
+    spin_start "Sweeping ${T_LABEL[$id]}…"
+    clean_target "$id"
+    status=$?
+    spin_stop
+    bytes=${R_BYTES[$id]}
+    size_text=$(human_size "$bytes")
+    ((bytes < 0)) && size_text="size unknown"
+    if ((status != 0)); then
+      FAILED+=("$id")
+      printf '  %s %s %s\n' "${C_RED}${GLYPH_FAIL}${C_RESET}" "${T_LABEL[$id]}" "${C_DIM}· failed, see oms log${C_RESET}"
+      continue
+    fi
+    SWEPT_COUNT=$((SWEPT_COUNT + 1))
+    ((bytes > 0)) && SWEPT_BYTES=$((SWEPT_BYTES + bytes))
+    if [[ $DRY_RUN == 1 ]]; then
+      printf '  %s %s %s %s\n' "${C_YELLOW}${GLYPH_DRY}${C_RESET}" "${T_LABEL[$id]}" "${C_DIM}· ${size_text}${C_RESET}" "${C_YELLOW}dry${C_RESET}"
+      dry_actions
+    else
+      printf '  %s %s %s\n' "${C_GREEN}${GLYPH_OK}${C_RESET}" "${T_LABEL[$id]}" "${C_DIM}· ${size_text}${C_RESET}"
+    fi
+  done
+  cursor_show
+}
+
+dry_actions() {
+  local action shown=0
+  for action in "${DRY_ACTIONS[@]}"; do
+    if ((shown == 3)); then
+      printf '    %s\n' "${C_DIM}${GLYPH_SUB} +$((${#DRY_ACTIONS[@]} - 3)) more${C_RESET}"
+      break
+    fi
+    printf '    %s\n' "${C_DIM}${GLYPH_SUB} ${action}${C_RESET}"
+    shown=$((shown + 1))
+  done
+}
+
+summary() {
+  local started=$1 free_before=$2 free_after elapsed lines=() gained
+  elapsed=$((SECONDS - started))
+  if [[ $DRY_RUN == 1 ]]; then
+    lines+=("${C_BOLD}Preview complete${C_RESET} · nothing was deleted")
+    lines+=("Could free $(human_size "$SWEPT_BYTES") from $SWEPT_COUNT items")
+    lines+=("${C_DIM}Run oms to sweep for real${C_RESET}")
+  else
+    sync
+    sleep 1
+    free_after=$(free_bytes)
+    gained=$((free_after - free_before))
+    lines+=("${C_BOLD}Sweep complete${C_RESET} · ${elapsed}s")
+    lines+=("Swept $(human_size "$SWEPT_BYTES") from $SWEPT_COUNT items")
+    if ((gained >= 0)); then
+      lines+=("Free space $(human_size "$free_after") ${C_GREEN}(+$(human_size "$gained"))${C_RESET}")
+    else
+      lines+=("Free space $(human_size "$free_after")")
+    fi
+    ((${#FAILED[@]})) && lines+=("${C_RED}Failed: $(join_by ", " "${FAILED[@]}")${C_RESET}")
+    lines+=("${C_DIM}Log ${OMS_OPLOG/#$HOME/\~}${C_RESET}")
+  fi
+
+  printf '\n'
+  if has_gum; then
+    gum style --border rounded --padding "0 2" --margin "0 1" "${lines[@]}"
+  else
+    printf '  %s\n' "${lines[@]}"
+  fi
+
+  if [[ $DRY_RUN != 1 ]] && ((SWEPT_BYTES > 1073741824 && gained < SWEPT_BYTES / 2)) && snapper_active; then
+    printf '\n'
+    note "Freed less than swept. Some data may still live in Btrfs snapshots"
+    note "or in hard links shared with other files. Review: sudo snapper list"
+  fi
+}
+
+hold() {
+  [[ $HOLD == 1 ]] || return 0
+  if command -v omarchy-show-done >/dev/null 2>&1; then
+    omarchy-show-done
+  else
+    printf '\n%s' "${C_GREEN}${GLYPH_ON}${C_RESET} Done! Press any key to close..."
+    read -rsn 1 </dev/tty
+    printf '\n'
+  fi
+}
+
+finish() {
+  hold
+  exit "${1:-0}"
+}
+
+cmd_clean() {
+  local yes=0 all=0 only="" skip=""
+  HOLD=0
+  while (($#)); do
+    case $1 in
+      -n | --dry-run) DRY_RUN=1 ;;
+      -y | --yes) yes=1 ;;
+      -a | --all) all=1 ;;
+      --only) only=${2:-}; shift ;;
+      --only=*) only=${1#*=} ;;
+      --skip) skip=${2:-}; shift ;;
+      --skip=*) skip=${1#*=} ;;
+      --debug) DEBUG=1 ;;
+      --hold) HOLD=1 ;;
+      -h | --help) usage; exit 0 ;;
+      *) die "Unknown option for oms clean: $1 (see oms help)" ;;
+    esac
+    shift
+  done
+
+  INTERACTIVE=0
+  [[ -t 0 && -t 1 ]] && INTERACTIVE=1
+  if [[ $INTERACTIVE == 0 && $yes == 0 && $DRY_RUN == 0 ]]; then
+    die "No terminal to confirm in. Pass --yes to sweep the safe items, or --dry-run to preview."
+  fi
+
+  local started=$SECONDS free_before
+  free_before=$(free_bytes)
+  banner "Sweep your Omarchy · v${OMS_VERSION}"
+  if [[ $DRY_RUN == 1 ]]; then
+    warn "Dry run · preview only, nothing is deleted"
+  else
+    note "Use --dry-run to preview · oms whitelist protects paths"
+  fi
+
+  scan_all
+  show_table
+  if ((${#NUMBERED[@]} == 0)); then
+    printf '\n  %s\n' "${C_GREEN}${GLYPH_OK}${C_RESET} Nothing to sweep. Your system is already tidy."
+    finish 0
+  fi
+
+  default_selection "$all"
+  apply_filters "$only" "$skip"
+  if [[ $yes == 0 && -z $only && $INTERACTIVE == 1 ]]; then
+    pick_interactive || {
+      printf '\n'
+      note "Cancelled. Nothing was touched."
+      finish 0
+    }
+  fi
+  if ((${#SELECTED[@]} == 0)); then
+    printf '\n'
+    note "Nothing selected. Nothing was touched."
+    finish 0
+  fi
+
+  if [[ $yes == 0 && $DRY_RUN == 0 ]]; then
+    printf '\n'
+    confirm "Sweep ${#SELECTED[@]} items ($(human_size "$(selection_bytes)"))?" || {
+      note "Cancelled. Nothing was touched."
+      finish 0
+    }
+  fi
+
+  ensure_sudo
+  ((${#SELECTED[@]})) || finish 0
+  sweep
+  summary "$started" "$free_before"
+  ((${#FAILED[@]})) && finish 1
+  finish 0
+}
+
+json_scan() {
+  local id safe=0
+  for id in "${SCANNED[@]}"; do
+    [[ ${R_STATUS[$id]} == ready && ${T_TIER[$id]} == safe ]] && ((${R_BYTES[$id]} > 0)) && safe=$((safe + ${R_BYTES[$id]}))
+  done
+  ranked_targets | while IFS= read -r id; do
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$id" "${T_LABEL[$id]}" "${T_SECTION[$id]}" "${T_TIER[$id]}" \
+      "${T_SUDO[$id]}" "${R_BYTES[$id]}" "${R_STATUS[$id]}" "${R_NOTE[$id]}"
+  done | jq -Rn --argjson safe "$safe" --argjson free "$(free_bytes)" --arg version "$OMS_VERSION" '
+    {
+      version: $version,
+      freeBytes: $free,
+      safeBytes: $safe,
+      targets: [inputs | split("\t") | {
+        id: .[0], label: .[1], section: .[2], tier: .[3], sudo: (.[4] == "1"),
+        bytes: (.[5] | tonumber), status: .[6], note: .[7]
+      }]
+    }'
+}
+
+cmd_scan() {
+  local json=0
+  while (($#)); do
+    case $1 in
+      --json) json=1 ;;
+      --debug) DEBUG=1 ;;
+      -h | --help) usage; exit 0 ;;
+      *) die "Unknown option for oms scan: $1" ;;
+    esac
+    shift
+  done
+  if [[ $json == 1 ]]; then
+    command -v jq >/dev/null 2>&1 || die "oms scan --json needs jq"
+    UI_TTY=0
+    for id in "${TARGET_IDS[@]}"; do
+      scan_target "$id"
+    done
+    json_scan
+    return
+  fi
+  banner "Sweep your Omarchy · v${OMS_VERSION}"
+  scan_all
+  show_table
+  if ((${#NUMBERED[@]} == 0)); then
+    printf '\n  %s\n' "${C_GREEN}${GLYPH_OK}${C_RESET} Nothing to sweep. Your system is already tidy."
+    return
+  fi
+  printf '\n'
+  local id ids=()
+  for id in "${NUMBERED[@]}"; do ids+=("$id"); done
+  note "IDs: $(join_by " " "${ids[@]}")"
+  note "Run oms to pick and sweep, or oms clean --only ID,ID"
+}
+
+cmd_whitelist() {
+  mkdir -p "$OMS_CONFIG_DIR"
+  if [[ ! -f $OMS_WHITELIST ]]; then
+    cat >"$OMS_WHITELIST" <<'EOF'
+# omasweep whitelist
+#
+# One entry per line. Lines starting with # are ignored.
+#
+# A target ID skips that whole target:
+#   docker-images
+#   steam-shaders
+#
+# An absolute path (or ~/path) is never deleted, and neither is anything
+# below it. Globs work:
+#   ~/.cache/pnpm
+#   ~/Work/keep-this-project/node_modules
+#   ~/.cache/chromium/*/Code Cache
+EOF
+  fi
+  if [[ ! -t 0 ]]; then
+    printf '%s\n' "$OMS_WHITELIST"
+    return
+  fi
+  "${EDITOR:-nvim}" "$OMS_WHITELIST"
+}
+
+cmd_log() {
+  [[ -f $OMS_OPLOG ]] || {
+    note "No sweeps logged yet."
+    return
+  }
+  local colorize=(sed -e "s/ REMOVED / ${C_GREEN}REMOVED${C_RESET} /" -e "s/ FAILED/ ${C_RED}FAILED${C_RESET}/" -e "s/ SKIPPED / ${C_YELLOW}SKIPPED${C_RESET} /" -e "s/ RAN / ${C_BLUE}RAN${C_RESET} /")
+  if [[ ${1:-} == -f ]]; then
+    tail -n 40 -f "$OMS_OPLOG" | "${colorize[@]}"
+  else
+    tail -n 60 "$OMS_OPLOG" | "${colorize[@]}"
+  fi
+}
+
+cmd_link() {
+  local bin=$HOME/.local/bin
+  mkdir -p "$bin"
+  ln -sfn "$OMS_ROOT/bin/oms" "$bin/oms"
+  printf '  %s\n' "${C_GREEN}${GLYPH_OK}${C_RESET} Linked $bin/oms → $OMS_ROOT/bin/oms"
+  [[ :$PATH: == *":$bin:"* ]] || warn "$bin is not on your PATH"
+}
+
+main() {
+  ui_init
+  TERM_COLS=$(tput cols 2>/dev/null || printf '100')
+  ((TERM_COLS > 0)) || TERM_COLS=100
+  [[ $EUID == 0 ]] && die "Run omasweep as your user. It asks for sudo when a target needs it."
+  trap on_exit EXIT
+  trap on_interrupt INT TERM
+  load_gum_theme
+  load_whitelist
+
+  local command=${1:-clean}
+  if [[ $command == -* ]]; then
+    command=clean
+  elif (($#)); then
+    shift
+  fi
+  case $command in
+    clean) cmd_clean "$@" ;;
+    scan) cmd_scan "$@" ;;
+    whitelist) cmd_whitelist ;;
+    log) cmd_log "$@" ;;
+    link) cmd_link ;;
+    version | --version | -v) printf 'omasweep %s\n' "$OMS_VERSION" ;;
+    help | --help | -h) usage ;;
+    *) die "Unknown command: $command (see oms help)" ;;
+  esac
+}
+
+main "$@"

@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.e2goon.omasweep",
+  "name": "omasweep",
+  "version": "0.1.0",
+  "author": "e2goon",
+  "license": "MIT",
+  "description": "Reclaim disk space on Omarchy: package caches, old tool versions, Docker, developer and browser caches.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "omasweep",
+    "description": "See what can be swept and open a terminal to pick and clean it.",
+    "category": "System",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "showSize": false,
+      "refreshIntervalMin": 30
+    },
+    "schema": [
+      {
+        "key": "showSize",
+        "type": "boolean",
+        "label": "Show size in bar",
+        "description": "Show the safe-to-sweep total next to the icon.",
+        "defaultValue": false
+      },
+      {
+        "key": "refreshIntervalMin",
+        "type": "integer",
+        "label": "Refresh interval (minutes)",
+        "min": 5,
+        "max": 1440,
+        "step": 5,
+        "defaultValue": 30
+      }
+    ]
+  }
+}
