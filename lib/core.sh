@@ -9,6 +9,7 @@ OMS_OPLOG_MAX=5242880
 DRY_RUN=${OMS_DRY_RUN:-0}
 DEBUG=${OMS_DEBUG:-0}
 WHITELIST=()
+WHITELIST_MATCHES=()
 DRY_ACTIONS=()
 
 debug() {
@@ -18,15 +19,19 @@ debug() {
 
 load_whitelist() {
   WHITELIST=()
+  WHITELIST_MATCHES=()
   [[ -f $OMS_WHITELIST ]] || return 0
   local line
   while IFS= read -r line || [[ -n $line ]]; do
-    line=${line%%#*}
     line=${line#"${line%%[![:space:]]*}"}
+    [[ -n $line && $line != \#* ]] || continue
+    line=${line%%[[:space:]]#*}
     line=${line%"${line##*[![:space:]]}"}
-    [[ -n $line ]] || continue
-    WHITELIST+=("${line/#\~/$HOME}")
+    line=${line/#\~/$HOME}
+    WHITELIST+=("$line")
+    [[ $line == /* ]] && mapfile -t -O "${#WHITELIST_MATCHES[@]}" WHITELIST_MATCHES < <(compgen -G "$line")
   done <"$OMS_WHITELIST"
+  return 0
 }
 
 target_whitelisted() {
@@ -54,10 +59,10 @@ path_covered() {
 }
 
 path_protected() {
-  local path=${1%/} entry
+  local path=${1%/} match
   path_covered "$path" && return 0
-  for entry in "${WHITELIST[@]}"; do
-    [[ $entry == "$path"/* ]] && return 0
+  for match in "${WHITELIST_MATCHES[@]}"; do
+    [[ $match == "$path"/* ]] && return 0
   done
   return 1
 }

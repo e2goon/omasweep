@@ -205,9 +205,17 @@ seed() {
   mkdir -p "$SANDBOX/.bun/install"
   ln -s "$OUTSIDE/bun/cache" "$SANDBOX/.bun/install/cache"
 
+  blob "$SANDBOX/.cache/thumbnails/normal/keep/thumb.png" 10
+  blob "$SANDBOX/Work/c#app/package.json" 10
+  blob "$SANDBOX/Work/c#app/node_modules/pkg/index.js" 10
+  find "$SANDBOX/Work/c#app" -exec touch -h -d '90 days ago' {} +
+
   cat >"$SANDBOX/.config/omasweep/whitelist" <<'EOF'
 # comment
+  # indented comment
 ~/.npm/_cacache/keep*
+~/.cache/thumbnails/*/keep   # keep pinned thumbnails
+~/Work/c#app/node_modules
 trash
 EOF
 }
@@ -302,6 +310,7 @@ check "review items are not swept by default" not_called "docker image prune"
 check "orphans are not removed by default" not_called "pacman -Rns"
 check "read-only npm cache is removed" test ! -e "$SANDBOX/.npm/_cacache/content"
 check "whitelisted glob survives" test -f "$SANDBOX/.npm/_cacache/keep me/file"
+check "whitelisted glob two levels down survives" test -f "$SANDBOX/.cache/thumbnails/normal/keep/thumb.png"
 check "cache directory itself stays" test -d "$SANDBOX/.cache/thumbnails"
 check "thumbnails are emptied" test ! -e "$SANDBOX/.cache/thumbnails/large"
 check "symlink inside a cache is removed as a link" test ! -L "$SANDBOX/.cache/thumbnails/link-dir"
@@ -318,6 +327,7 @@ check "unused docker images are pruned" called "docker image prune -af"
 check "orphans are removed by name" called "pacman -Rns --noconfirm orphan-a orphan-b"
 check "stale node_modules is removed" test ! -e "$SANDBOX/Work/old/node_modules"
 check "recent node_modules stays" test -f "$SANDBOX/Work/new/node_modules/pkg/index.js"
+check "whitelisted path containing # survives" test -f "$SANDBOX/Work/c#app/node_modules/pkg/index.js"
 check "stale Rust target is removed" test ! -e "$SANDBOX/Work/rusty/target"
 check "target with deploy keys stays" test -f "$SANDBOX/Work/anchor/target/deploy/key.json"
 check "stale virtualenv is removed" test ! -e "$SANDBOX/Work/py/.venv"

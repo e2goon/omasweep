@@ -174,7 +174,7 @@ unique_names() {
 }
 
 scan_paths() {
-  local id=$1 entry path kept=() open=()
+  local id=$1 match path kept=() open=()
   resolve_paths "$id"
   mapfile -t open < <(unique_names "${PATH_SKIPPED[@]}")
   if ((${#PATH_LIST[@]} == 0)); then
@@ -184,9 +184,9 @@ scan_paths() {
     return 0
   fi
   SCAN_BYTES=$(size_of "${PATH_LIST[@]}")
-  for entry in "${WHITELIST[@]}"; do
+  for match in "${WHITELIST_MATCHES[@]}"; do
     for path in "${PATH_LIST[@]}"; do
-      [[ $entry == "$path"/* ]] && mapfile -t -O "${#kept[@]}" kept < <(glob_expand "$entry")
+      [[ $match == "$path"/* ]] && kept+=("$match")
     done
   done
   ((${#kept[@]})) && SCAN_BYTES=$((SCAN_BYTES - $(size_of "${kept[@]}")))
