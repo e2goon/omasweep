@@ -21,7 +21,7 @@ BarWidget {
   property var targets: []
 
   readonly property bool showSize: setting("showSize", false) === true
-  readonly property int refreshIntervalMin: Math.max(5, Number(setting("refreshIntervalMin", 30)))
+  readonly property int refreshIntervalMin: Math.max(5, Number(setting("refreshIntervalMin", 30)) || 30)
   readonly property string pluginPath: decodeURIComponent(
     Qt.resolvedUrl(".").toString().replace(/^file:\/\//, "").replace(/\/$/, ""))
   readonly property string omsPath: pluginPath + "/bin/oms"
@@ -61,6 +61,7 @@ BarWidget {
   function scan() {
     if (scanProc.running) return
     scanning = true
+    failed = false
     scanProc.running = true
   }
 
@@ -215,7 +216,7 @@ BarWidget {
         visible: root.topTargets.length > 0
 
         PanelSectionHeader {
-          text: "LARGEST"
+          text: "TOP ITEMS"
           color: root.bar.foreground
           foreground: root.bar.foreground
           fontFamily: root.bar.fontFamily
