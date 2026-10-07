@@ -1,5 +1,7 @@
 # omasweep
 
+**English** · [한국어](README.ko.md)
+
 Reclaim disk space on [Omarchy](https://omarchy.org). omasweep is a terminal cleaner (`oms`) plus an
 Omarchy shell bar widget. It knows where an Arch + Hyprland machine piles up space: the pacman
 cache, old [mise](https://mise.jdx.dev) tool versions, Docker and Podman, package caches for every
@@ -252,8 +254,9 @@ tests/run.sh
 
 - checks syntax, runs `shellcheck` when installed (`uvx --from shellcheck-py shellcheck` works
   too), runs `qmllint` against the Omarchy shell modules, and validates the plugin manifest
-- replaces `sudo`, `paccache`, `pacman`, `journalctl`, `mise`, `docker`, `uv`, `pnpm`, and `pgrep`
-  with stubs that record their arguments, so every cleanup command is checked exactly
+- replaces `sudo`, `paccache`, `pacman`, `journalctl`, `mise`, `docker`, `uv`, `go`, `pnpm`,
+  `flatpak`, and `ps` with stubs that record their arguments, so every cleanup command is checked
+  exactly
 - sweeps a throwaway home directory and confirms what is removed and what survives: whitelisted
   paths, symlink targets, caches of running apps, recent projects, and anything outside `$HOME`
 
