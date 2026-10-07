@@ -195,6 +195,11 @@ seed() {
   blob "$SANDBOX/Work/goapp/go.mod" 10
   blob "$SANDBOX/Work/goapp/vendor/mod/x.go" 10
   blob "$SANDBOX/Work/old/package.json" 10
+  blob "$SANDBOX/Work/deep/package.json" 10
+  blob "$SANDBOX/Work/deep/node_modules/pkg/index.js" 10
+  blob "$SANDBOX/Work/deep/src/app/old.js" 10
+  find "$SANDBOX/Work/deep" -exec touch -h -d '90 days ago' {} +
+  blob "$SANDBOX/Work/deep/src/app/main.js" 10
   find "$SANDBOX"/Work/{rusty,anchor,py,goapp} -exec touch -h -d '90 days ago' {} +
   touch -d '90 days ago' "$SANDBOX/Work/old/package.json" "$SANDBOX/Work/old"
 
@@ -262,7 +267,7 @@ check "unused docker images need review" jq -e '.targets[] | select(.id == "dock
 check "orphans are measured from pacman -Qi" jq -e '.targets[] | select(.id == "orphans") | .bytes == 4194304' <<<"$json"
 check "Electron apps are discovered from ~/.config" jq -e '.targets[] | select(.id == "app-caches") | .note | contains("Obsidian")' <<<"$json"
 check "an app holding its SingletonLock is skipped" jq -e '.targets[] | select(.id == "app-caches") | .note | contains("skipping open: Busy App")' <<<"$json"
-check "only installers older than the cutoff count" jq -e '.targets[] | select(.id == "installers") | .note == "1 file: old-tool.deb"' <<<"$json"
+check "an installer with an old mtime but a fresh ctime is not offered" jq -e '[.targets[] | select(.id == "installers")] | length == 0' <<<"$json"
 check "AI CLI keeps the active and previous version" jq -e '.targets[] | select(.id == "ai-cli-versions") | .note | startswith("1 version")' <<<"$json"
 check "a stray chromium process does not block the browser cache" jq -e '.targets[] | select(.id == "chromium") | .status == "ready"' <<<"$(FAKE_RUNNING=chromium oms scan --json)"
 ln -s "$(hostname)-$$" "$SANDBOX/.config/chromium/SingletonLock"
@@ -333,8 +338,8 @@ check "target with deploy keys stays" test -f "$SANDBOX/Work/anchor/target/deplo
 check "stale virtualenv is removed" test ! -e "$SANDBOX/Work/py/.venv"
 check "Go vendor directory stays" test -f "$SANDBOX/Work/goapp/vendor/mod/x.go"
 check "go module cache is cleaned by go" called "go clean -modcache"
-check "old installer is removed" test ! -e "$SANDBOX/Downloads/old-tool.deb"
-check "recent installer and documents stay" test -f "$SANDBOX/Downloads/new-tool.deb" -a -f "$SANDBOX/Downloads/notes.pdf"
+check "installers and documents stay" test -f "$SANDBOX/Downloads/old-tool.deb" -a -f "$SANDBOX/Downloads/notes.pdf"
+check "a project edited deep inside keeps its node_modules" test -f "$SANDBOX/Work/deep/node_modules/pkg/index.js"
 check "whitelisted target stays even with --all" test -f "$SANDBOX/.local/share/Trash/files/a.txt"
 
 printf '\nWithout sudo\n'
@@ -345,6 +350,10 @@ check "crash dumps survive" test -f "$SANDBOX/coredump/core.app.1000.zst"
 check "user caches are still swept" test ! -e "$SANDBOX/.cache/thumbnails/large"
 
 printf '\nGuards\n'
+seed
+check "a malformed OMS_STALE_DAYS stops the run" bash -c "! OMS_STALE_DAYS=30d '$OMS' scan --json"
+OMS_STALE_DAYS=30d oms clean --yes --all >/dev/null 2>&1
+check "nothing is removed after a malformed setting" test -d "$SANDBOX/Work/old/node_modules"
 seed
 oms clean --yes --only thumbnails --skip thumbnails >/dev/null 2>&1
 check "--skip wins over --only" test -f "$SANDBOX/.cache/thumbnails/large/a.png"

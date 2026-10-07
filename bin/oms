@@ -537,6 +537,7 @@ main() {
   [[ $EUID == 0 ]] && die "Run omasweep as your user. It asks for sudo when a target needs it."
   trap on_exit EXIT
   trap on_interrupt INT TERM
+  validate_settings
   load_gum_theme
   load_whitelist
 

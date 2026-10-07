@@ -10,6 +10,13 @@ OMS_JOURNAL_KEEP=${OMS_JOURNAL_KEEP:-4weeks}
 OMS_STALE_DAYS=${OMS_STALE_DAYS:-30}
 OMS_PROJECT_DIRS=${OMS_PROJECT_DIRS:-"$HOME/Projects:$HOME/projects:$HOME/Code:$HOME/code:$HOME/src:$HOME/dev:$HOME/Work:$HOME/work"}
 
+validate_settings() {
+  [[ $OMS_STALE_DAYS =~ ^[0-9]+$ ]] || die "OMS_STALE_DAYS must be a whole number of days, got '$OMS_STALE_DAYS'"
+  [[ $OMS_PACMAN_KEEP =~ ^[0-9]+$ ]] || die "OMS_PACMAN_KEEP must be a whole number, got '$OMS_PACMAN_KEEP'"
+  [[ $OMS_JOURNAL_KEEP =~ ^[0-9]+(d|days?|w|weeks?|months?)$ ]] ||
+    die "OMS_JOURNAL_KEEP must look like 2weeks, 30days, or 1month, got '$OMS_JOURNAL_KEEP'"
+}
+
 CACHE=${XDG_CACHE_HOME:-$HOME/.cache}
 DATA=${XDG_DATA_HOME:-$HOME/.local/share}
 CONFIG=${XDG_CONFIG_HOME:-$HOME/.config}

@@ -100,8 +100,13 @@ scan_orphans() {
 }
 
 clean_orphans() {
-  ((${#ORPHANS[@]})) || return 0
-  run sudo -n pacman -Rns --noconfirm "${ORPHANS[@]}"
+  local current=() still=() name
+  mapfile -t current < <(pacman -Qdtq 2>/dev/null)
+  for name in "${ORPHANS[@]}"; do
+    [[ " ${current[*]} " == *" $name "* ]] && still+=("$name")
+  done
+  ((${#still[@]})) || return 0
+  run sudo -n pacman -Rns --noconfirm "${still[@]}"
 }
 
 INSTALLERS=()
@@ -119,7 +124,7 @@ scan_installers() {
   [[ -d $dir ]] || return 1
   mapfile -t INSTALLERS < <(find "$dir" -maxdepth 1 -type f \
     \( -name '*.deb' -o -name '*.rpm' -o -name '*.pkg.tar.*' -o -name '*.iso' -o -name '*.dmg' \
-    -o -name '*.exe' -o -name '*.msi' \) -mtime +"$OMS_STALE_DAYS" 2>/dev/null)
+    -o -name '*.exe' -o -name '*.msi' \) -mtime +"$OMS_STALE_DAYS" -ctime +"$OMS_STALE_DAYS" 2>/dev/null)
   ((${#INSTALLERS[@]})) || return 1
   SCAN_BYTES=$(size_of "${INSTALLERS[@]}")
   local names=() file
@@ -132,6 +137,10 @@ scan_installers() {
 clean_installers() {
   local file failed=0
   for file in "${INSTALLERS[@]}"; do
+    if [[ -z $(find "$file" -maxdepth 0 -type f -mtime +"$OMS_STALE_DAYS" -ctime +"$OMS_STALE_DAYS" 2>/dev/null) ]]; then
+      oplog "SKIPPED $file, changed since the scan"
+      continue
+    fi
     remove_path "$file" || failed=1
   done
   return "$failed"
