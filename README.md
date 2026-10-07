@@ -105,7 +105,7 @@ as root is refused as well; it asks for `sudo` itself.
 | `trash` | `~/.local/share/Trash` | review | empty the directory |
 | `mise` | Tool versions no mise config refers to | safe | `mise prune` |
 | `docker-build` | Docker build cache | safe | `docker builder prune -af` |
-| `docker-images` | Images no container uses | safe | `docker image prune -af` |
+| `docker-images` | Every image no container uses, including ones you pulled on purpose | review | `docker image prune -af` |
 | `aur` | yay and paru build clones | safe | empty `~/.cache/yay`, `~/.cache/paru` |
 | `npm` | `~/.npm/_cacache`, `_npx`, `_logs` | safe | empty the directories |
 | `pnpm` | pnpm metadata cache | safe | empty `~/.cache/pnpm` |

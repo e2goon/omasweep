@@ -87,7 +87,7 @@ paths trash "$data/Trash/files" "$data/Trash/info"
 target mise "Tools" safe 0 "Old mise tool versions" "mise prune" "mise"
 
 target docker-build "Containers" safe 0 "Docker build cache" "docker builder prune"
-target docker-images "Containers" safe 0 "Unused Docker images" "pulled again when needed"
+target docker-images "Containers" review 0 "Unused Docker images" "every image no container uses, pulled again when needed"
 
 target aur "Developer caches" safe 0 "AUR build cache" "yay and paru clones" "yay paru makepkg"
 paths aur "$cache/yay" "$cache/paru"
