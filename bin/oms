@@ -7,7 +7,11 @@ OMS_ROOT=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)
 
 source "$OMS_ROOT/lib/ui.sh"
 source "$OMS_ROOT/lib/core.sh"
-source "$OMS_ROOT/lib/targets.sh"
+source "$OMS_ROOT/lib/engine.sh"
+for module in system containers dev browsers games projects; do
+  source "$OMS_ROOT/lib/targets/$module.sh"
+done
+unset module
 
 usage() {
   cat <<EOF
@@ -33,8 +37,8 @@ ${C_BOLD}Clean options${C_RESET}
 ${C_BOLD}Environment${C_RESET}
   OMS_PACMAN_KEEP=2       Package versions to keep in the pacman cache
   OMS_JOURNAL_KEEP=4weeks Journal age to keep
-  OMS_STALE_DAYS=30       Days before a project's node_modules counts as stale
-  OMS_PROJECT_DIRS        Colon-separated roots to search for node_modules
+  OMS_STALE_DAYS=30       Days before project build output or an installer counts as stale
+  OMS_PROJECT_DIRS        Colon-separated roots to search for project build output
 
 Run ${C_BOLD}oms scan${C_RESET} to see target IDs.
 EOF
@@ -265,6 +269,10 @@ sweep() {
     bytes=${R_BYTES[$id]}
     size_text=$(human_size "$bytes")
     ((bytes < 0)) && size_text="size unknown"
+    if ((status == CLEAN_SKIPPED)); then
+      printf '  %s %s %s\n' "${C_YELLOW}${GLYPH_OFF}${C_RESET}" "${T_LABEL[$id]}" "${C_DIM}· skipped, $(busy_label "${T_BUSY[$id]}") opened since the scan${C_RESET}"
+      continue
+    fi
     if ((status != 0)); then
       FAILED+=("$id")
       printf '  %s %s %s\n' "${C_RED}${GLYPH_FAIL}${C_RESET}" "${T_LABEL[$id]}" "${C_DIM}· failed, see oms log${C_RESET}"

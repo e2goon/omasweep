@@ -194,25 +194,6 @@ remove_path() {
   fi
 }
 
-process_running() {
-  local name
-  for name in "$@"; do
-    pgrep -u "$UID" -x "$name" >/dev/null 2>&1 && {
-      BUSY_NAME=$name
-      return 0
-    }
-  done
-  return 1
-}
-
-docker_ready() {
-  command -v docker >/dev/null 2>&1 || return 1
-  if [[ -z ${DOCKER_READY:-} ]]; then
-    if timeout 5 docker info >/dev/null 2>&1; then DOCKER_READY=1; else DOCKER_READY=0; fi
-  fi
-  [[ $DOCKER_READY == 1 ]]
-}
-
 snapper_active() {
   [[ $(findmnt -no FSTYPE / 2>/dev/null) == btrfs ]] || return 1
   compgen -G "/etc/snapper/configs/*" >/dev/null

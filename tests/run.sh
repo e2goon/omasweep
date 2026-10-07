@@ -156,11 +156,11 @@ EOF
 make_stubs
 
 printf '\nStatic checks\n'
-for file in "$OMS" "$ROOT"/lib/*.sh "$ROOT"/tests/*.sh; do
+for file in "$OMS" "$ROOT"/lib/*.sh "$ROOT"/lib/targets/*.sh "$ROOT"/tests/*.sh; do
   check "bash -n ${file#"$ROOT"/}" bash -n "$file"
 done
 if command -v shellcheck >/dev/null 2>&1; then
-  check "shellcheck" shellcheck -x "$OMS" "$ROOT"/lib/*.sh "$ROOT"/tests/*.sh
+  check "shellcheck" shellcheck -x "$OMS" "$ROOT"/lib/*.sh "$ROOT"/lib/targets/*.sh "$ROOT"/tests/*.sh
 fi
 if command -v omarchy >/dev/null 2>&1; then
   check "omarchy plugin validate" omarchy plugin validate "$ROOT"
