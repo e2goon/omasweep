@@ -15,6 +15,7 @@ BarWidget {
   property bool scanned: false
   property bool failed: false
   property bool popoutSwitchClosing: false
+  property real lastScanAt: 0
   property real safeBytes: 0
   property real freeBytes: 0
   property var targets: []
@@ -32,7 +33,10 @@ BarWidget {
 
   readonly property bool opened: popupOpen
 
-  function open() { popupOpen = true; scan() }
+  function open() {
+    popupOpen = true
+    if (Date.now() - lastScanAt > 60000) scan()
+  }
   function close() { popupOpen = false }
   function toggle() { popupOpen ? close() : open() }
   function closeForPopoutSwitch() {
@@ -68,6 +72,7 @@ BarWidget {
       freeBytes = Number(result.freeBytes || 0)
       failed = false
       scanned = true
+      lastScanAt = Date.now()
     } catch (e) {
       failed = true
     }
