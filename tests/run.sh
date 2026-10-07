@@ -44,7 +44,8 @@ oms() {
     XDG_CACHE_HOME="$SANDBOX/.cache" XDG_DATA_HOME="$SANDBOX/.local/share" \
     XDG_CONFIG_HOME="$SANDBOX/.config" XDG_STATE_HOME="$SANDBOX/.local/state" \
     OMS_PROJECT_DIRS="$SANDBOX/Work" OMS_JOURNAL_DIR="$SANDBOX/journal" \
-    OMS_COREDUMP_DIR="$SANDBOX/coredump" OMS_TEST_CALLS="$CALLS" NO_COLOR=1 \
+    OMS_COREDUMP_DIR="$SANDBOX/coredump" OMS_PACMAN_CACHE_DIR="$SANDBOX/pkg" \
+    OMS_TEST_CALLS="$CALLS" NO_COLOR=1 \
     "$OMS" "$@"
 }
 
@@ -66,7 +67,7 @@ echo "sudo $*" >>"$OMS_TEST_CALLS"
 exec "$@"
 EOF
   stub paccache <<'EOF'
-if [[ $1 == -d* ]]; then
+if [[ " $* " == *" -d"* ]]; then
   echo "==> finished dry run: 3 candidates (disk space saved: 1.50 MiB)"
 else
   echo "paccache $*" >>"$OMS_TEST_CALLS"
@@ -99,6 +100,20 @@ esac
 EOF
   stub uv <<'EOF'
 echo "uv $*" >>"$OMS_TEST_CALLS"
+EOF
+  stub go <<'EOF'
+if [[ "$*" == "env GOMODCACHE" ]]; then
+  echo "$HOME/go/pkg/mod"
+else
+  echo "go $*" >>"$OMS_TEST_CALLS"
+fi
+EOF
+  stub flatpak <<'EOF'
+case $1 in
+  ps) printf "%s\n" ${FAKE_FLATPAK_RUNNING:-} ;;
+  list) echo org.freedesktop.Platform ;;
+  *) echo "flatpak $*" >>"$OMS_TEST_CALLS" ;;
+esac
 EOF
   stub pnpm <<'EOF'
 echo "pnpm $*" >>"$OMS_TEST_CALLS"
@@ -138,8 +153,50 @@ seed() {
   blob "$SANDBOX/journal/abc/system@0001.journal" 100000
   touch -d '60 days ago' "$SANDBOX/journal/abc/system@0001.journal"
   blob "$SANDBOX/coredump/core.app.1000.zst" 100000
+  blob "$SANDBOX/pkg/download-abc/partial.part" 1000
+
   blob "$SANDBOX/.cargo/registry/cache/index/serde.crate" 100000
   blob "$SANDBOX/.cargo/registry/src/index/serde/lib.rs" 100000
+  blob "$SANDBOX/.gradle/caches/build-cache-1/entry" 100000
+  blob "$SANDBOX/.gradle/caches/modules-2/files/dep.jar" 100000
+  blob "$SANDBOX/go/pkg/mod/example.com/m/go.mod" 100000
+
+  blob "$SANDBOX/.config/Obsidian/GPUCache/data_0" 100000
+  blob "$SANDBOX/.config/Obsidian/Local Storage/leveldb/000003.log" 10
+  blob "$SANDBOX/.config/Obsidian/Cookies" 10
+  blob "$SANDBOX/.config/Busy App/Code Cache/js/index" 100000
+  ln -s "$(hostname)-$$" "$SANDBOX/.config/Busy App/SingletonLock"
+  blob "$SANDBOX/.config/chromium/Default/GPUCache/data_0" 100000
+  blob "$SANDBOX/.config/chromium/Default/History" 10
+  blob "$SANDBOX/.config/chromium/Default/Login Data" 10
+  blob "$SANDBOX/.var/app/org.example.Idle/cache/c" 100000
+  blob "$SANDBOX/.var/app/org.example.Idle/data/keep" 10
+  blob "$SANDBOX/.var/app/org.example.Open/cache/c" 100000
+
+  blob "$SANDBOX/.local/share/claude/versions/1.0.0" 100000
+  blob "$SANDBOX/.local/share/claude/versions/1.1.0" 100000
+  blob "$SANDBOX/.local/share/claude/versions/1.2.0" 100000
+  touch -d '3 days ago' "$SANDBOX/.local/share/claude/versions/1.0.0"
+  touch -d '2 days ago' "$SANDBOX/.local/share/claude/versions/1.1.0"
+  mkdir -p "$SANDBOX/.local/bin"
+  ln -s "$SANDBOX/.local/share/claude/versions/1.1.0" "$SANDBOX/.local/bin/claude"
+
+  blob "$SANDBOX/Downloads/old-tool.deb" 100000
+  blob "$SANDBOX/Downloads/new-tool.deb" 100000
+  blob "$SANDBOX/Downloads/notes.pdf" 100000
+  touch -d '90 days ago' "$SANDBOX/Downloads/old-tool.deb" "$SANDBOX/Downloads/notes.pdf"
+
+  blob "$SANDBOX/Work/rusty/Cargo.toml" 10
+  blob "$SANDBOX/Work/rusty/target/debug/app" 100000
+  blob "$SANDBOX/Work/anchor/Cargo.toml" 10
+  blob "$SANDBOX/Work/anchor/target/deploy/key.json" 10
+  blob "$SANDBOX/Work/py/pyproject.toml" 10
+  blob "$SANDBOX/Work/py/.venv/pyvenv.cfg" 10
+  blob "$SANDBOX/Work/goapp/go.mod" 10
+  blob "$SANDBOX/Work/goapp/vendor/mod/x.go" 10
+  blob "$SANDBOX/Work/old/package.json" 10
+  find "$SANDBOX"/Work/{rusty,anchor,py,goapp} -exec touch -h -d '90 days ago' {} +
+  touch -d '90 days ago' "$SANDBOX/Work/old/package.json" "$SANDBOX/Work/old"
 
   blob "$OUTSIDE/victim/keep.txt" 10
   ln -s "$OUTSIDE/victim" "$SANDBOX/.cache/thumbnails/link-dir"
@@ -174,6 +231,10 @@ if [[ -n $QMLLINT && -d ${OMARCHY_PATH:-/usr/share/omarchy}/shell ]]; then
   lint=$("$QMLLINT" -I "$WORK/qml" "$ROOT/BarWidget.qml" 2>&1 | grep '^Warning' | grep -vE '\[(missing-property|signal-handler-parameters)\]$')
   check "qmllint finds nothing beyond the shell's untyped bar object" test -z "$lint"
 fi
+long_labels=$(bash -c 'source "$1/lib/ui.sh"; source "$1/lib/core.sh"; source "$1/lib/engine.sh"
+  for module in "$1"/lib/targets/*.sh; do source "$module"; done
+  for id in "${TARGET_IDS[@]}"; do ((${#T_LABEL[$id]} > 26)) && echo "$id"; done' _ "$ROOT")
+check "target labels fit the table" test -z "$long_labels"
 check "manifest version matches oms" test "$(jq -r .version "$ROOT/manifest.json")" = "$("$OMS" version | cut -d' ' -f2)"
 for fn in opened popoutSwitchClosing "function open" "function close" "function toggle" "function closeForPopoutSwitch"; do
   check "bar widget exposes ${fn#function }" grep -q "$fn" "$ROOT/BarWidget.qml"
@@ -191,8 +252,11 @@ check "only the mise version no config needs is counted" jq -e '.targets[] | sel
 check "docker sizes come from docker system df" jq -e '[.targets[] | select(.id == "docker-build" or .id == "docker-images") | .bytes] == [2000000000, 1500000000]' <<<"$json"
 check "unused docker images need review" jq -e '.targets[] | select(.id == "docker-images") | .tier == "review"' <<<"$json"
 check "orphans are measured from pacman -Qi" jq -e '.targets[] | select(.id == "orphans") | .bytes == 4194304' <<<"$json"
+check "Electron apps are discovered from ~/.config" jq -e '.targets[] | select(.id == "app-caches") | .note | contains("Obsidian")' <<<"$json"
+check "an app holding its SingletonLock is skipped" jq -e '.targets[] | select(.id == "app-caches") | .note | contains("skipping open: Busy App")' <<<"$json"
+check "only installers older than the cutoff count" jq -e '.targets[] | select(.id == "installers") | .note == "1 file: old-tool.deb"' <<<"$json"
+check "AI CLI keeps the active and previous version" jq -e '.targets[] | select(.id == "ai-cli-versions") | .note | startswith("1 version")' <<<"$json"
 check "a stray chromium process does not block the browser cache" jq -e '.targets[] | select(.id == "chromium") | .status == "ready"' <<<"$(FAKE_RUNNING=chromium oms scan --json)"
-mkdir -p "$SANDBOX/.config/chromium"
 ln -s "$(hostname)-$$" "$SANDBOX/.config/chromium/SingletonLock"
 check "browser cache is skipped while its profile is open" jq -e '.targets[] | select(.id == "chromium") | .status == "busy"' <<<"$(oms scan --json)"
 
@@ -207,16 +271,32 @@ check "dry run writes no log" test ! -e "$SANDBOX/.local/state/omasweep/operatio
 
 printf '\nSweep safe items\n'
 seed
-oms clean --yes >/dev/null 2>&1
-check "pacman cache keeps two versions" called "paccache -rk2"
-check "uninstalled packages leave the cache" called "paccache -ruk0"
+FAKE_FLATPAK_RUNNING=org.example.Open oms clean --yes >/dev/null 2>&1
+check "pacman cache keeps two versions" called "paccache -c $SANDBOX/pkg -rk2"
+check "uninstalled packages leave the cache" called "paccache -c $SANDBOX/pkg -ruk0"
 check "journal is vacuumed through sudo" called "sudo -n journalctl --vacuum-time=4weeks"
 check "crash dumps are removed" test ! -e "$SANDBOX/coredump/core.app.1000.zst"
 check "mise prunes through its own command" called "mise prune -y"
 check "docker build cache is pruned" called "docker builder prune -af"
 check "uv prunes through its own command" called "uv cache prune"
+check "interrupted pacman downloads are removed" test ! -e "$SANDBOX/pkg/download-abc"
+check "unused flatpak runtimes are removed" called "flatpak uninstall --user --unused --noninteractive"
 check "cargo keeps extracted sources" test -f "$SANDBOX/.cargo/registry/src/index/serde/lib.rs"
 check "cargo archives are removed" test ! -e "$SANDBOX/.cargo/registry/cache/index/serde.crate"
+check "gradle keeps downloaded dependencies" test -f "$SANDBOX/.gradle/caches/modules-2/files/dep.jar"
+check "gradle build cache is emptied" test ! -e "$SANDBOX/.gradle/caches/build-cache-1/entry"
+check "go module cache needs review" test -f "$SANDBOX/go/pkg/mod/example.com/m/go.mod"
+check "Electron GPU cache is removed" test ! -e "$SANDBOX/.config/Obsidian/GPUCache/data_0"
+check "Electron local storage and cookies stay" test -f "$SANDBOX/.config/Obsidian/Cookies" -a -f "$SANDBOX/.config/Obsidian/Local Storage/leveldb/000003.log"
+check "an app holding its lock keeps its cache" test -f "$SANDBOX/.config/Busy App/Code Cache/js/index"
+check "browser profile cache is removed" test ! -e "$SANDBOX/.config/chromium/Default/GPUCache/data_0"
+check "browser history and logins stay" test -f "$SANDBOX/.config/chromium/Default/History" -a -f "$SANDBOX/.config/chromium/Default/Login Data"
+check "idle flatpak app cache is removed" test ! -e "$SANDBOX/.var/app/org.example.Idle/cache/c"
+check "flatpak app data stays" test -f "$SANDBOX/.var/app/org.example.Idle/data/keep"
+check "running flatpak app keeps its cache" test -f "$SANDBOX/.var/app/org.example.Open/cache/c"
+check "oldest AI CLI version is removed" test ! -e "$SANDBOX/.local/share/claude/versions/1.0.0"
+check "active AI CLI version stays" test -f "$SANDBOX/.local/share/claude/versions/1.1.0"
+check "newest other AI CLI version stays" test -f "$SANDBOX/.local/share/claude/versions/1.2.0"
 check "pnpm store is pruned" called "pnpm store prune"
 check "review items are not swept by default" not_called "docker image prune"
 check "orphans are not removed by default" not_called "pacman -Rns"
@@ -227,7 +307,6 @@ check "thumbnails are emptied" test ! -e "$SANDBOX/.cache/thumbnails/large"
 check "symlink inside a cache is removed as a link" test ! -L "$SANDBOX/.cache/thumbnails/link-dir"
 check "directory a symlink pointed to survives" test -f "$OUTSIDE/victim/keep.txt"
 check "symlinked cache directory is left alone" test -f "$OUTSIDE/bun/cache/pkg"
-check "closed browser's cache is emptied" test ! -e "$SANDBOX/.cache/chromium/Default"
 check "stale node_modules is not swept by default" test -d "$SANDBOX/Work/old/node_modules"
 check "trash is untouched" test -f "$SANDBOX/.local/share/Trash/files/a.txt"
 check "operation log records removals" grep -q REMOVED "$SANDBOX/.local/state/omasweep/operations.log"
@@ -239,6 +318,9 @@ check "unused docker images are pruned" called "docker image prune -af"
 check "orphans are removed by name" called "pacman -Rns --noconfirm orphan-a orphan-b"
 check "stale node_modules is removed" test ! -e "$SANDBOX/Work/old/node_modules"
 check "recent node_modules stays" test -f "$SANDBOX/Work/new/node_modules/pkg/index.js"
+check "go module cache is cleaned by go" called "go clean -modcache"
+check "old installer is removed" test ! -e "$SANDBOX/Downloads/old-tool.deb"
+check "recent installer and documents stay" test -f "$SANDBOX/Downloads/new-tool.deb" -a -f "$SANDBOX/Downloads/notes.pdf"
 check "whitelisted target stays even with --all" test -f "$SANDBOX/.local/share/Trash/files/a.txt"
 
 printf '\nWithout sudo\n'

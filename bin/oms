@@ -8,7 +8,7 @@ OMS_ROOT=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)
 source "$OMS_ROOT/lib/ui.sh"
 source "$OMS_ROOT/lib/core.sh"
 source "$OMS_ROOT/lib/engine.sh"
-for module in system containers dev browsers games projects; do
+for module in system containers dev browsers apps games ai projects; do
   source "$OMS_ROOT/lib/targets/$module.sh"
 done
 unset module

@@ -2,6 +2,7 @@
 
 target docker-build "Containers" safe 0 "Docker build cache" "docker builder prune"
 target docker-images "Containers" review 0 "Unused Docker images" "every image no container uses, pulled again when needed"
+target podman-images "Containers" review 0 "Unused Podman images" "every image no container uses, pulled again when needed"
 
 declare -A ENGINE_DF
 
@@ -38,4 +39,12 @@ scan_docker-images() {
 
 clean_docker-images() {
   run docker image prune -af
+}
+
+scan_podman-images() {
+  engine_reclaimable podman "Images"
+}
+
+clean_podman-images() {
+  run podman image prune -af
 }
