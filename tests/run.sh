@@ -126,11 +126,18 @@ EOF
   stub pnpm <<'EOF'
 echo "pnpm $*" >>"$OMS_TEST_CALLS"
 EOF
-  stub pgrep <<'EOF'
-for name in ${FAKE_RUNNING:-}; do
-  [[ ${!#} == "$name" ]] && exit 0
-done
-exit 1
+  stub ps <<'EOF'
+if [[ -n ${FAKE_REAL_PS:-} || " $* " == *" -p "* ]]; then
+  exec /usr/bin/ps "$@"
+fi
+case "$*" in
+  *comm=*) printf "%s\n" ${FAKE_RUNNING:-} ;;
+  *args=*)
+    for name in ${FAKE_RUNNING:-}; do echo "100 $name"; done
+    [[ -n ${FAKE_ARGS:-} ]] && echo "101 $FAKE_ARGS"
+    ;;
+esac
+exit 0
 EOF
 }
 
@@ -219,6 +226,7 @@ seed() {
   ln -s "$OUTSIDE/bun/cache" "$SANDBOX/.bun/install/cache"
 
   blob "$SANDBOX/.cache/thumbnails/normal/keep/thumb.png" 10
+  blob "$SANDBOX/.cache/huggingface/hub/models--x/blob" 100000
   blob "$SANDBOX/Work/c#app/package.json" 10
   blob "$SANDBOX/Work/c#app/node_modules/pkg/index.js" 10
   find "$SANDBOX/Work/c#app" -exec touch -h -d '90 days ago' {} +
@@ -279,6 +287,8 @@ check "an installer with an old mtime but a fresh ctime is not offered" jq -e '[
 check "AI CLI keeps the active and previous version" jq -e '.targets[] | select(.id == "ai-cli-versions") | .note | startswith("1 version")' <<<"$json"
 check "a stray chromium process does not block the browser cache" jq -e '.targets[] | select(.id == "chromium") | .status == "ready"' <<<"$(FAKE_RUNNING=chromium oms scan --json)"
 ln -s "$(hostname)-$$" "$SANDBOX/.config/chromium/SingletonLock"
+check "a running process marks its target busy" jq -e '.targets[] | select(.id == "uv") | .status == "busy"' <<<"$(FAKE_RUNNING=uv oms scan --json)"
+check "a matching command line marks its target busy" jq -e '.targets[] | select(.id == "gradle") | .status == "busy"' <<<"$(FAKE_ARGS="java org.gradle.launcher.daemon.bootstrap.GradleDaemon 8.10" oms scan --json)"
 check "browser cache is skipped while its profile is open" jq -e '.targets[] | select(.id == "chromium") | .status == "busy"' <<<"$(oms scan --json)"
 
 printf '\nDry run\n'
@@ -349,6 +359,11 @@ check "go module cache is cleaned by go" called "go clean -modcache"
 check "installers and documents stay" test -f "$SANDBOX/Downloads/old-tool.deb" -a -f "$SANDBOX/Downloads/notes.pdf"
 check "a project edited deep inside keeps its node_modules" test -f "$SANDBOX/Work/deep/node_modules/pkg/index.js"
 check "whitelisted target stays even with --all" test -f "$SANDBOX/.local/share/Trash/files/a.txt"
+
+printf '\nOwn command line\n'
+seed
+FAKE_REAL_PS=1 oms clean --yes --only huggingface >/dev/null 2>&1
+check "oms does not mistake its own arguments for a running app" test ! -e "$SANDBOX/.cache/huggingface/hub/models--x"
 
 printf '\nWithout sudo\n'
 seed

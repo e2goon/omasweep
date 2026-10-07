@@ -78,6 +78,28 @@ lock_token() {
 
 declare -A LOCK_CACHE
 FLATPAK_RUNNING=""
+PROC_NAMES=""
+PROC_ARGS=()
+PROC_TAKEN=0
+
+reset_busy_cache() {
+  LOCK_CACHE=()
+  FLATPAK_RUNNING=""
+  PROC_TAKEN=0
+}
+
+proc_snapshot() {
+  ((PROC_TAKEN)) && return 0
+  PROC_TAKEN=1
+  local self pid args
+  self=$(ps -o args= -p $$ 2>/dev/null)
+  PROC_NAMES=$'\n'$(ps -u "$UID" -o comm= 2>/dev/null)$'\n'
+  PROC_ARGS=()
+  while read -r pid args; do
+    [[ $pid == "$$" || $args == "$self" ]] && continue
+    PROC_ARGS+=("$args")
+  done < <(ps -u "$UID" -o pid=,args= 2>/dev/null)
+}
 
 lock_alive() {
   local lock=$1 target pid
@@ -97,8 +119,13 @@ token_busy() {
       return 1
       ;;
     match:*)
-      lock=${token#match:}
-      pgrep -u "$UID" -f -- "${lock//%20/ }" >/dev/null 2>&1
+      local pattern=${token#match:} args
+      pattern=${pattern//%20/ }
+      proc_snapshot
+      for args in "${PROC_ARGS[@]}"; do
+        [[ $args =~ $pattern ]] && return 0
+      done
+      return 1
       ;;
     name:*)
       return 1
@@ -110,7 +137,8 @@ token_busy() {
       [[ $FLATPAK_RUNNING == *" ${token#flatpak:} "* ]]
       ;;
     *)
-      pgrep -u "$UID" -x -- "$token" >/dev/null 2>&1
+      proc_snapshot
+      [[ $PROC_NAMES == *$'\n'"${token:0:15}"$'\n'* ]]
       ;;
   esac
 }
@@ -206,7 +234,7 @@ scan_paths() {
 
 clean_paths() {
   local id=$1 path failed=0
-  LOCK_CACHE=()
+  reset_busy_cache
   resolve_paths "$id"
   for path in "${PATH_LIST[@]}"; do
     clear_contents "$path" || failed=1
@@ -245,8 +273,7 @@ CLEAN_SKIPPED=3
 
 clean_target() {
   local id=$1
-  LOCK_CACHE=()
-  FLATPAK_RUNNING=""
+  reset_busy_cache
   if [[ -n ${T_BUSY[$id]} ]] && busy_spec "${T_BUSY[$id]}"; then
     oplog "SKIPPED $id, $(busy_label "${T_BUSY[$id]}") is running"
     return "$CLEAN_SKIPPED"
