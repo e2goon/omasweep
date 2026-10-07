@@ -168,10 +168,17 @@ omarchy plugin enable io.github.e2goon.omasweep
 tests/run.sh
 ```
 
-`tests/run.sh` checks syntax, runs `shellcheck` when it is installed (`uvx --from shellcheck-py
-shellcheck` works too), validates the plugin manifest, and sweeps a throwaway home directory to
-confirm what is removed and what survives. After editing `BarWidget.qml` through a symlinked
-checkout, run `omarchy restart shell` to load the change.
+`tests/run.sh` never touches your system. It:
+
+- checks syntax, runs `shellcheck` when installed (`uvx --from shellcheck-py shellcheck` works
+  too), runs `qmllint` against the Omarchy shell modules, and validates the plugin manifest
+- replaces `sudo`, `paccache`, `pacman`, `journalctl`, `mise`, `docker`, `uv`, `pnpm`, and `pgrep`
+  with stubs that record their arguments, so every cleanup command is checked exactly
+- sweeps a throwaway home directory and confirms what is removed and what survives: whitelisted
+  paths, symlink targets, caches of running apps, recent projects, and anything outside `$HOME`
+
+After editing `BarWidget.qml` through a symlinked checkout, run `omarchy restart shell` to load
+the change.
 
 The plugin follows the [Omarchy shell plugin manual](https://github.com/omacom/omarchy/blob/quattro/manual/32-shell-plugins.md)
 and [shell reference](https://github.com/omacom/omarchy/blob/quattro/docs/omarchy-shell.md).

@@ -137,11 +137,14 @@ clean_pacman() {
   run sudo -n paccache -rk"$OMS_PACMAN_KEEP" && run sudo -n paccache -ruk0
 }
 
+JOURNAL_DIR=${OMS_JOURNAL_DIR:-/var/log/journal}
+COREDUMP_DIR=${OMS_COREDUMP_DIR:-/var/lib/systemd/coredump}
+
 scan_journal() {
-  [[ -d /var/log/journal ]] || return 1
+  [[ -d $JOURNAL_DIR ]] || return 1
   local days
   days=$(journal_keep_days)
-  SCAN_BYTES=$(find /var/log/journal -type f -name '*@*.journal*' -mtime +"$days" -printf '%s\n' 2>/dev/null | awk '{ s += $1 } END { print s + 0 }')
+  SCAN_BYTES=$(find "$JOURNAL_DIR" -type f -name '*@*.journal*' -mtime +"$days" -printf '%s\n' 2>/dev/null | awk '{ s += $1 } END { print s + 0 }')
 }
 
 journal_keep_days() {
@@ -160,12 +163,12 @@ clean_journal() {
 }
 
 scan_coredumps() {
-  [[ -d /var/lib/systemd/coredump ]] || return 1
-  SCAN_BYTES=$(find /var/lib/systemd/coredump -type f -printf '%s\n' 2>/dev/null | awk '{ s += $1 } END { print s + 0 }')
+  [[ -d $COREDUMP_DIR ]] || return 1
+  SCAN_BYTES=$(find "$COREDUMP_DIR" -type f -printf '%s\n' 2>/dev/null | awk '{ s += $1 } END { print s + 0 }')
 }
 
 clean_coredumps() {
-  run sudo -n find /var/lib/systemd/coredump -mindepth 1 -type f -delete
+  run sudo -n find "$COREDUMP_DIR" -mindepth 1 -type f -delete
 }
 
 ORPHANS=()
