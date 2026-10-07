@@ -1,3 +1,5 @@
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import Quickshell
 import Quickshell.Io
@@ -218,6 +220,7 @@ BarWidget {
           model: root.topTargets
 
           Item {
+            id: targetRow
             required property var modelData
             width: parent.width
             height: rowLabel.implicitHeight
@@ -228,19 +231,19 @@ BarWidget {
               anchors.right: rowSize.left
               anchors.rightMargin: Style.space(8)
               elide: Text.ElideRight
-              text: (modelData.tier === "safe" ? "●  " : "○  ") + modelData.label + (modelData.sudo ? "  󰒃" : "")
-              color: modelData.tier === "safe" ? root.bar.foreground : root.dim
+              text: (targetRow.modelData.tier === "safe" ? "●  " : "○  ") + targetRow.modelData.label + (targetRow.modelData.sudo ? "  󰒃" : "")
+              color: targetRow.modelData.tier === "safe" ? root.bar.foreground : root.dim
               font.family: root.bar.fontFamily
               font.pixelSize: Style.font.body
             }
             Text {
               id: rowSize
               anchors.right: parent.right
-              text: root.humanSize(modelData.bytes)
-              color: modelData.bytes >= 1073741824 ? Color.accent : root.bar.foreground
+              text: root.humanSize(targetRow.modelData.bytes)
+              color: targetRow.modelData.bytes >= 1073741824 ? Color.accent : root.bar.foreground
               font.family: root.bar.fontFamily
               font.pixelSize: Style.font.body
-              font.bold: modelData.bytes >= 1073741824
+              font.bold: targetRow.modelData.bytes >= 1073741824
             }
           }
         }
