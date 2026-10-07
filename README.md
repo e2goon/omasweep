@@ -34,7 +34,7 @@ caches, browser caches, Steam shader caches, and `node_modules` in projects you 
   you toggle items, then you confirm once. `--dry-run` shows exactly which commands would run and
   which directories would be emptied.
 - **Uses each tool's own cleanup.** `mise prune`, `docker builder prune`, `paccache`,
-  `journalctl --vacuum-time`, `uv cache clean`, and `pnpm store prune` instead of deleting their
+  `journalctl --vacuum-time`, `uv cache prune`, and `pnpm store prune` instead of deleting their
   data behind their back.
 - **Leaves running apps alone.** A browser or Steam cache is skipped while that app is open.
 - **Omarchy-native.** Follows the active theme (ANSI palette and Omarchy's gum colors), keeps two
@@ -110,7 +110,7 @@ as root is refused as well; it asks for `sudo` itself.
 | `npm` | `~/.npm/_cacache`, `_npx`, `_logs` | safe | empty the directories |
 | `pnpm` | pnpm metadata cache | safe | empty `~/.cache/pnpm` |
 | `pnpm-store` | Store packages no project links to | safe | `pnpm store prune` |
-| `uv`, `pip`, `bun`, `go`, `cargo` | Package and build caches | safe | `uv cache clean` or empty the cache |
+| `uv`, `pip`, `bun`, `go`, `cargo` | Package and build caches (Cargo keeps extracted sources) | safe | `uv cache prune` or empty the cache |
 | `build-misc` | node-gyp, TypeScript, Yarn, Deno, mise downloads | safe | empty the directories |
 | `chromium`, `chrome`, `brave`, `firefox` | Browser HTTP caches in `~/.cache` (profiles and logins are untouched) | safe | empty the directory |
 | `steam-shaders` | Steam shader cache | review | empty the directory |

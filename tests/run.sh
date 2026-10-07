@@ -138,6 +138,8 @@ seed() {
   blob "$SANDBOX/journal/abc/system@0001.journal" 100000
   touch -d '60 days ago' "$SANDBOX/journal/abc/system@0001.journal"
   blob "$SANDBOX/coredump/core.app.1000.zst" 100000
+  blob "$SANDBOX/.cargo/registry/cache/index/serde.crate" 100000
+  blob "$SANDBOX/.cargo/registry/src/index/serde/lib.rs" 100000
 
   blob "$OUTSIDE/victim/keep.txt" 10
   ln -s "$OUTSIDE/victim" "$SANDBOX/.cache/thumbnails/link-dir"
@@ -210,7 +212,9 @@ check "journal is vacuumed through sudo" called "sudo -n journalctl --vacuum-tim
 check "crash dumps are removed" test ! -e "$SANDBOX/coredump/core.app.1000.zst"
 check "mise prunes through its own command" called "mise prune -y"
 check "docker build cache is pruned" called "docker builder prune -af"
-check "uv cleans through its own command" called "uv cache clean"
+check "uv prunes through its own command" called "uv cache prune"
+check "cargo keeps extracted sources" test -f "$SANDBOX/.cargo/registry/src/index/serde/lib.rs"
+check "cargo archives are removed" test ! -e "$SANDBOX/.cargo/registry/cache/index/serde.crate"
 check "pnpm store is pruned" called "pnpm store prune"
 check "review items are not swept by default" not_called "docker image prune"
 check "orphans are not removed by default" not_called "pacman -Rns"
