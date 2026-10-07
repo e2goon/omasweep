@@ -11,6 +11,8 @@ DEBUG=${OMS_DEBUG:-0}
 WHITELIST=()
 WHITELIST_MATCHES=()
 DRY_ACTIONS=()
+TEMP_FILES=()
+OPLOG_STATE=new
 
 debug() {
   [[ $DEBUG == 1 ]] && printf '%s\n' "${C_DIM}  [debug] $*${C_RESET}" >&2
@@ -40,10 +42,6 @@ target_whitelisted() {
     [[ $entry == "$id" ]] && return 0
   done
   return 1
-}
-
-glob_expand() {
-  compgen -G "$1" || printf '%s\n' "$1"
 }
 
 path_covered() {
@@ -125,14 +123,21 @@ free_bytes() {
   df -B1 --output=avail "$HOME" 2>/dev/null | awk 'NR == 2 { print $1 + 0 }'
 }
 
-oplog() {
-  [[ $DRY_RUN == 1 || -n ${OMS_NO_OPLOG:-} ]] && return 0
-  mkdir -p "$OMS_STATE_DIR" || return 0
+open_oplog() {
+  OPLOG_STATE=off
+  mkdir -p "$OMS_STATE_DIR" 2>/dev/null || return 0
   [[ -L $OMS_OPLOG ]] && return 0
   if [[ -f $OMS_OPLOG ]] && (($(stat -c %s "$OMS_OPLOG") > OMS_OPLOG_MAX)); then
     mv -f "$OMS_OPLOG" "$OMS_OPLOG.1"
   fi
-  printf '[%s] %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$*" >>"$OMS_OPLOG"
+  OPLOG_STATE=on
+}
+
+oplog() {
+  [[ $DRY_RUN == 1 || -n ${OMS_NO_OPLOG:-} ]] && return 0
+  [[ $OPLOG_STATE == new ]] && open_oplog
+  [[ $OPLOG_STATE == on ]] || return 0
+  printf '[%(%Y-%m-%dT%H:%M:%S%z)T] %s\n' -1 "$*" >>"$OMS_OPLOG"
 }
 
 run() {
@@ -207,6 +212,11 @@ remove_path() {
       return 1
     fi
   fi
+}
+
+remove_temp_files() {
+  ((${#TEMP_FILES[@]})) && rm -f -- "${TEMP_FILES[@]}"
+  return 0
 }
 
 snapper_active() {

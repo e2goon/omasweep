@@ -133,10 +133,7 @@ scan_installers() {
     -o -name '*.exe' -o -name '*.msi' \) -mtime +"$OMS_STALE_DAYS" -ctime +"$OMS_STALE_DAYS" 2>/dev/null)
   ((${#INSTALLERS[@]})) || return 1
   SCAN_BYTES=$(size_of "${INSTALLERS[@]}")
-  local names=() file
-  for file in "${INSTALLERS[@]}"; do
-    names+=("$(basename "$file")")
-  done
+  local names=("${INSTALLERS[@]##*/}")
   SCAN_NOTE="$(plural ${#INSTALLERS[@]} file): $(preview_list 2 "${names[@]}")"
 }
 

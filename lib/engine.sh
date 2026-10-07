@@ -4,6 +4,7 @@ TARGET_IDS=()
 declare -A T_SECTION T_TIER T_SUDO T_LABEL T_NOTE T_BUSY T_PATHS
 declare -A R_BYTES R_STATUS R_NOTE
 SCANNED=()
+BEFORE_SCAN=()
 
 OMS_PACMAN_KEEP=${OMS_PACMAN_KEEP:-2}
 OMS_JOURNAL_KEEP=${OMS_JOURNAL_KEEP:-4weeks}
@@ -46,6 +47,18 @@ preview_list() {
   printf '%s' "$(join_by ", " "${@:1:limit}")"
   (($# > limit)) && printf ' +%d more' $(($# - limit))
   return 0
+}
+
+before_scan() {
+  BEFORE_SCAN+=("$@")
+}
+
+prepare_scan() {
+  local hook
+  for hook in "${BEFORE_SCAN[@]}"; do
+    "$hook"
+  done
+  BEFORE_SCAN=()
 }
 
 target() {
@@ -186,14 +199,19 @@ PATH_LIST=()
 PATH_SKIPPED=()
 
 resolve_paths() {
-  local id=$1 pattern name busy match
+  local id=$1 pattern name busy match matches
   PATH_LIST=()
   PATH_SKIPPED=()
   [[ -n ${T_PATHS[$id]:-} ]] || return 0
   while IFS=$'\t' read -r pattern name busy; do
     [[ -n $pattern ]] || continue
-    while IFS= read -r match; do
-      [[ -n $match && -e $match && ! -L $match ]] || continue
+    if [[ $pattern == *[*?[]* ]]; then
+      mapfile -t matches < <(compgen -G "$pattern")
+    else
+      matches=("$pattern")
+    fi
+    for match in "${matches[@]}"; do
+      [[ -e $match && ! -L $match ]] || continue
       path_safe "$match" || continue
       path_covered "$match" && continue
       if [[ -n $busy ]] && busy_spec "$busy"; then
@@ -201,7 +219,7 @@ resolve_paths() {
         continue
       fi
       PATH_LIST+=("$match")
-    done < <(glob_expand "$pattern")
+    done
   done <<<"${T_PATHS[$id]}"
 }
 

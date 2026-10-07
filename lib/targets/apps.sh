@@ -20,7 +20,7 @@ discover_app_caches() {
   local dir app name process sub
   for dir in "$CONFIG"/*/; do
     dir=${dir%/}
-    app=$(basename "$dir")
+    app=${dir##*/}
     [[ $BROWSER_CONFIG_DIRS == *" $app "* ]] && continue
     [[ -d $dir/GPUCache || -d "$dir/Code Cache" ]] || continue
     [[ -L $dir ]] && continue
@@ -43,10 +43,10 @@ discover_flatpak_caches() {
   local dir app
   for dir in "$HOME"/.var/app/*/cache; do
     [[ -d $dir ]] || continue
-    app=$(basename "$(dirname "$dir")")
+    app=${dir%/cache}
+    app=${app##*/}
     app_path flatpak-caches "$dir" "$app" "name:$app flatpak:$app"
   done
 }
 
-discover_app_caches
-discover_flatpak_caches
+before_scan discover_app_caches discover_flatpak_caches

@@ -288,6 +288,7 @@ check "a tab in a project name keeps the JSON intact" jq -e '.targets[] | select
 check "an unreadable folder does not hide the journal" jq -e '[.targets[] | select(.id == "journal")] | length == 1' <<<"$json"
 check "symlinked cache directory is not measured" jq -e '[.targets[] | select(.id == "bun")] | length == 0' <<<"$json"
 check "only the mise version no config needs is counted" jq -e '.targets[] | select(.id == "mise") | .bytes < 300000' <<<"$json"
+check "scan leaves no temporary files behind" test -z "$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'omasweep.*' -newer "$CALLS" 2>/dev/null)"
 check "docker sizes come from docker system df" jq -e '[.targets[] | select(.id == "docker-build" or .id == "docker-images") | .bytes] == [2000000000, 1500000000]' <<<"$json"
 check "unused docker images need review" jq -e '.targets[] | select(.id == "docker-images") | .tier == "review"' <<<"$json"
 check "orphans are measured from pacman -Qi" jq -e '.targets[] | select(.id == "orphans") | .bytes == 4194304' <<<"$json"

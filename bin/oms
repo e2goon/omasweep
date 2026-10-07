@@ -53,6 +53,7 @@ load_gum_theme() {
 on_exit() {
   spin_stop
   cursor_show
+  remove_temp_files
 }
 
 on_interrupt() {
@@ -73,6 +74,7 @@ target_list() {
 
 scan_all() {
   local id
+  prepare_scan
   cursor_hide
   for id in "${TARGET_IDS[@]}"; do
     spin_start "Scanning ${T_LABEL[$id]}…"
@@ -479,9 +481,7 @@ cmd_scan() {
   if [[ $json == 1 ]]; then
     command -v jq >/dev/null 2>&1 || die "oms scan --json needs jq"
     UI_TTY=0
-    for id in "${TARGET_IDS[@]}"; do
-      scan_target "$id"
-    done
+    scan_all
     json_scan
     return
   fi
