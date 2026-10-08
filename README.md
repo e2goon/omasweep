@@ -63,6 +63,18 @@ is used when present and ships with Omarchy. Tools such as `mise`, `docker`, `pa
 (`pacman-contrib`), `uv`, or `pnpm` are only used when installed; their targets are skipped
 otherwise.
 
+## Uninstall
+
+```bash
+rm ~/.local/bin/oms
+omarchy plugin remove io.github.e2goon.omasweep
+```
+
+The first command removes the `oms` link. The second takes the widget off the bar and deletes the
+plugin. For a CLI-only install, run `rm -rf ~/.local/share/omasweep` instead of the second command.
+To also drop your whitelist and the operation log, run
+`rm -rf ~/.config/omasweep ~/.local/state/omasweep`.
+
 ## Usage
 
 ```bash

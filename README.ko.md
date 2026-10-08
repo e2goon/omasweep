@@ -58,6 +58,17 @@ git clone https://github.com/e2goon/omasweep.git ~/.local/share/omasweep
 Omarchy에 기본으로 들어 있습니다. `mise`, `docker`, `paccache`(`pacman-contrib`), `uv`, `pnpm` 같은 도구는
 설치되어 있을 때만 쓰고, 없으면 해당 대상을 건너뜁니다.
 
+## 제거
+
+```bash
+rm ~/.local/bin/oms
+omarchy plugin remove io.github.e2goon.omasweep
+```
+
+첫 번째 명령은 `oms` 연결을 지웁니다. 두 번째 명령은 위젯을 바에서 내리고 플러그인을 삭제합니다. CLI만
+설치했다면 두 번째 명령 대신 `rm -rf ~/.local/share/omasweep`를 실행합니다. 화이트리스트와 작업 기록까지
+지우려면 `rm -rf ~/.config/omasweep ~/.local/state/omasweep`를 실행합니다.
+
 ## 사용법
 
 ```bash
