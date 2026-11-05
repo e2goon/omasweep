@@ -18,6 +18,7 @@ BarWidget {
   property real lastScanAt: 0
   property real safeBytes: 0
   property real freeBytes: 0
+  property real rootFreeBytes: -1
   property var targets: []
 
   readonly property bool showSize: setting("showSize", false) === true
@@ -30,6 +31,9 @@ BarWidget {
   readonly property int safeCount: readyTargets.filter(function(t) { return t.tier === "safe" }).length
   readonly property int busyCount: targets.length - readyTargets.length
   readonly property color dim: Qt.darker(root.bar.foreground, 1.35)
+  // omarchy update refuses to run with less than 10 GiB free on /.
+  readonly property real updateFloorBytes: 10 * 1073741824
+  readonly property bool lowSpace: rootFreeBytes >= 0 && rootFreeBytes < updateFloorBytes
 
   readonly property bool opened: popupOpen
 
@@ -67,10 +71,11 @@ BarWidget {
 
   function acceptScan(text) {
     try {
-      var result = JSON.parse(text)
+      const result = JSON.parse(text)
       targets = result.targets || []
       safeBytes = Number(result.safeBytes || 0)
       freeBytes = Number(result.freeBytes || 0)
+      if (result.rootFreeBytes !== undefined) rootFreeBytes = Number(result.rootFreeBytes)
       failed = false
       scanned = true
       lastScanAt = Date.now()
@@ -79,10 +84,19 @@ BarWidget {
     }
   }
 
+  function shellQuote(value) {
+    return "'" + String(value).replace(/'/g, "'\\''") + "'"
+  }
+
+  // Omarchy's floating-terminal launcher loads the current gum theme, shows the
+  // logo, and ends with its Done/Failed prompt for oms's exit code. Older
+  // installs without it get a plain terminal and oms holds the window itself.
   function launch(args) {
-    var command = ["setsid", "uwsm-app", "--", "xdg-terminal-exec",
-      "--app-id=org.omarchy.terminal", "--title=omasweep", "-e", omsPath, "clean", "--hold"]
-    Quickshell.execDetached(command.concat(args))
+    var argv = [omsPath, "clean"].concat(args)
+    var script = 'if command -v omarchy-launch-floating-terminal-with-presentation >/dev/null; then ' +
+      'exec omarchy-launch-floating-terminal-with-presentation "$1"; fi; shift; ' +
+      'exec setsid uwsm-app -- xdg-terminal-exec --app-id=org.omarchy.terminal --title=omasweep -e "$@" --hold'
+    Quickshell.execDetached(["bash", "-lc", script, "bash", argv.map(shellQuote).join(" ")].concat(argv))
     popupOpen = false
   }
 
@@ -96,13 +110,36 @@ BarWidget {
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
-  Component.onCompleted: if (showSize) scan()
+  Component.onCompleted: {
+    freeProc.running = true
+    if (showSize) scan()
+  }
 
   Timer {
     interval: root.refreshIntervalMin * 60000
     running: root.showSize
     repeat: true
     onTriggered: root.scan()
+  }
+
+  Timer {
+    interval: root.refreshIntervalMin * 60000
+    running: true
+    repeat: true
+    onTriggered: if (!freeProc.running) freeProc.running = true
+  }
+
+  Process {
+    id: freeProc
+    command: ["df", "-B1", "--output=avail", "/"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var lines = text.trim().split("\n")
+        var value = Number(lines[lines.length - 1])
+        if (lines.length > 1 && isFinite(value)) root.rootFreeBytes = value
+      }
+    }
   }
 
   Process {
@@ -122,8 +159,11 @@ BarWidget {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: root.showSize && root.scanned && root.safeBytes > 0 ? "󰃢 " + root.compactSize(root.safeBytes) : "󰃢"
-    tooltipText: root.scanned ? root.humanSize(root.safeBytes) + " safe to sweep" : "omasweep"
+    text: root.showSize && !root.vertical && root.scanned && root.safeBytes > 0 ? "󰃢 " + root.compactSize(root.safeBytes) : "󰃢"
+    active: root.lowSpace
+    tooltipText: root.lowSpace
+      ? "Only " + root.humanSize(root.rootFreeBytes) + " free, omarchy update needs 10 GB"
+      : root.scanned ? root.humanSize(root.safeBytes) + " safe to sweep" : "omasweep"
     onPressed: function(b) { if (b === Qt.LeftButton) root.toggle() }
   }
 
@@ -208,6 +248,17 @@ BarWidget {
             font.pixelSize: Style.font.bodySmall
           }
         }
+      }
+
+      Text {
+        visible: root.lowSpace
+        width: parent.width
+        text: "Only " + root.humanSize(root.rootFreeBytes) + " free on /. omarchy update needs at least 10 GB."
+        color: root.bar.urgent
+        font.family: root.bar.fontFamily
+        font.pixelSize: Style.font.bodySmall
+        font.bold: true
+        wrapMode: Text.Wrap
       }
 
       Column {

@@ -129,7 +129,7 @@ si_to_bytes() {
 }
 
 free_bytes() {
-  df -B1 --output=avail "$HOME" 2>/dev/null | awk 'NR == 2 { print $1 + 0 }'
+  df -B1 --output=avail "${1:-$HOME}" 2>/dev/null | awk 'NR == 2 { print $1 + 0 } END { if (NR < 2) print 0 }'
 }
 
 open_oplog() {
