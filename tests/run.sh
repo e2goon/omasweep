@@ -49,6 +49,8 @@ oms() {
     XDG_CONFIG_HOME="$SANDBOX/.config" XDG_STATE_HOME="$SANDBOX/.local/state" \
     OMS_PROJECT_DIRS="$SANDBOX/Work" OMS_JOURNAL_DIR="$SANDBOX/journal" \
     OMS_COREDUMP_DIR="$SANDBOX/coredump" OMS_PACMAN_CACHE_DIR="$SANDBOX/pkg" \
+    OMS_DOCKER_SOCKET="$WORK/docker.sock" \
+    OMS_DOCKER_ROOT="$SANDBOX/docker-root" \
     OMS_TEST=1 OMS_TEST_CALLS="$CALLS" NO_COLOR=1 \
     "$OMS" "$@"
 }
@@ -74,6 +76,7 @@ make_stubs() {
   stub sudo <<'EOF'
 echo "sudo $*" >>"$OMS_TEST_CALLS"
 [[ ${FAKE_SUDO:-allow} == deny ]] && exit 1
+export FAKE_ROOT=1
 [[ $1 == -n ]] && shift
 [[ $1 == -v || $1 == true ]] && exit 0
 exec "$@"
@@ -86,11 +89,7 @@ else
 fi
 EOF
   stub pacman <<'EOF'
-case $1 in
-  -Qdtq) printf "orphan-a\norphan-b\n" ;;
-  -Qi) shift; for p; do printf "Name            : %s\nInstalled Size  : 2.00 MiB\n\n" "$p"; done ;;
-  *) echo "pacman $*" >>"$OMS_TEST_CALLS" ;;
-esac
+echo "pacman $*" >>"$OMS_TEST_CALLS"
 EOF
   stub journalctl <<'EOF'
 echo "journalctl $*" >>"$OMS_TEST_CALLS"
@@ -105,6 +104,7 @@ else
 fi
 EOF
   stub docker <<'EOF'
+[[ ${FAKE_DOCKER_GROUP:-yes} == no && -z ${FAKE_ROOT:-} ]] && exit 1
 case $1 in
   info) exit 0 ;;
   system) printf "Images\t1.5GB (10%%)\nBuild Cache\t2GB\n" ;;
@@ -117,6 +117,8 @@ EOF
   stub go <<'EOF'
 if [[ "$*" == "env GOMODCACHE" ]]; then
   echo "$HOME/go/pkg/mod"
+elif [[ "$*" == "env GOCACHE" ]]; then
+  echo "$HOME/.cache/go-build"
 else
   echo "go $*" >>"$OMS_TEST_CALLS"
 fi
@@ -127,6 +129,19 @@ case $1 in
   list) echo org.freedesktop.Platform ;;
   *) echo "flatpak $*" >>"$OMS_TEST_CALLS" ;;
 esac
+EOF
+  stub gh <<'EOF'
+echo "gh $*" >>"$OMS_TEST_CALLS"
+EOF
+  stub fuser <<'EOF'
+[[ -n ${FAKE_REAL_FUSER:-} ]] && exec /usr/bin/fuser "$@"
+for file in ${FAKE_OPEN:-}; do
+  [[ " $* " == *" $file "* ]] && exit 0
+done
+exit 1
+EOF
+  stub omarchy-show-done <<'EOF'
+echo "omarchy-show-done $*" >>"$OMS_TEST_CALLS"
 EOF
   stub pnpm <<'EOF'
 echo "pnpm $*" >>"$OMS_TEST_CALLS"
@@ -260,11 +275,11 @@ EOF
 make_stubs
 
 printf '\nStatic checks\n'
-for file in "$OMS" "$ROOT"/lib/*.sh "$ROOT"/lib/targets/*.sh "$ROOT"/tests/*.sh; do
+for file in "$OMS" "$ROOT"/lib/*.sh "$ROOT"/lib/targets/*.sh "$ROOT"/tests/*.sh "$ROOT"/hooks/*; do
   check "bash -n ${file#"$ROOT"/}" bash -n "$file"
 done
 if command -v shellcheck >/dev/null 2>&1; then
-  check "shellcheck" shellcheck -x "$OMS" "$ROOT"/lib/*.sh "$ROOT"/lib/targets/*.sh "$ROOT"/tests/*.sh
+  check "shellcheck" shellcheck -x "$OMS" "$ROOT"/lib/*.sh "$ROOT"/lib/targets/*.sh "$ROOT"/tests/*.sh "$ROOT"/hooks/*
 fi
 if command -v omarchy >/dev/null 2>&1; then
   check "omarchy plugin validate" omarchy plugin validate "$ROOT"
@@ -299,7 +314,6 @@ check "only the mise version no config needs is counted" target_is mise '.bytes 
 check "scan leaves no temporary files behind" test -z "$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'omasweep.*' -newer "$CALLS" 2>/dev/null)"
 check "docker sizes come from docker system df" jq -e '[.targets[] | select(.id == "docker-build" or .id == "docker-images") | .bytes] == [2000000000, 1500000000]' <<<"$json"
 check "unused docker images need review" target_is docker-images '.tier == "review"'
-check "orphans are measured from pacman -Qi" target_is orphans '.bytes == 4194304'
 check "Electron apps are discovered from ~/.config" target_is app-caches '.note | contains("Obsidian")'
 check "an app holding its SingletonLock is skipped" target_is app-caches '.note | contains("skipping open: Busy App")'
 check "an installer with an old mtime but a fresh ctime is not offered" jq -e '[.targets[] | select(.id == "installers")] | length == 0' <<<"$json"
@@ -355,7 +369,7 @@ check "active AI CLI version stays" test -f "$SANDBOX/.local/share/claude/versio
 check "newest other AI CLI version stays" test -f "$SANDBOX/.local/share/claude/versions/1.2.0"
 check "pnpm store is pruned" called "pnpm store prune"
 check "review items are not swept by default" not_called "docker image prune"
-check "orphans are not removed by default" not_called "pacman -Rns"
+check "no package is ever removed" not_called "pacman -Rns"
 check "read-only npm cache is removed" test ! -e "$SANDBOX/.npm/_cacache/content"
 check "whitelisted glob survives" test -f "$SANDBOX/.npm/_cacache/keep me/file"
 check "whitelisted glob two levels down survives" test -f "$SANDBOX/.cache/thumbnails/normal/keep/thumb.png"
@@ -372,7 +386,6 @@ printf '\nSweep with --all\n'
 seed
 oms clean --yes --all >/dev/null 2>&1
 check "unused docker images are pruned" called "docker image prune -af"
-check "orphans are removed by name" called "pacman -Rns --noconfirm orphan-a orphan-b"
 check "stale node_modules is removed" test ! -e "$SANDBOX/Work/old/node_modules"
 check "recent node_modules stays" test -f "$SANDBOX/Work/new/node_modules/pkg/index.js"
 check "whitelisted path containing # survives" test -f "$SANDBOX/Work/c#app/node_modules/pkg/index.js"
@@ -385,6 +398,126 @@ check "installers and documents stay" test -f "$SANDBOX/Downloads/old-tool.deb" 
 check "a project edited deep inside keeps its node_modules" test -f "$SANDBOX/Work/deep/node_modules/pkg/index.js"
 check "whitelisted target stays even with --all" test -f "$SANDBOX/.local/share/Trash/files/a.txt"
 
+printf '\nOmarchy 4.5 targets\n'
+seed
+blob "$SANDBOX/.cache/go-build/aa/obj" 100000
+blob "$SANDBOX/.cache/gh/api/x" 100000
+blob "$SANDBOX/.kube/cache/discovery/x" 100000
+blob "$SANDBOX/.kube/config" 10
+blob "$SANDBOX/.cache/opencode/node_modules/x" 100000
+blob "$SANDBOX/.local/share/opencode/storage/session/s.json" 10
+blob "$SANDBOX/.config/google-chrome/OptGuideOnDeviceModel/weights.bin" 100000
+blob "$SANDBOX/.config/chromium/Default/Service Worker/CacheStorage/app/cache" 100000
+blob "$SANDBOX/Downloads/stale.crdownload" 100000
+blob "$SANDBOX/Downloads/held.part" 100000
+blob "$SANDBOX/Downloads/fresh.part" 100000
+touch -d '30 days ago' "$SANDBOX/Downloads/stale.crdownload" "$SANDBOX/Downloads/held.part"
+blob "$SANDBOX/Work/pyproj/pyproject.toml" 10
+blob "$SANDBOX/Work/pyproj/.tox/py312/lib/x" 100000
+blob "$SANDBOX/Work/gitproj/package.json" 10
+blob "$SANDBOX/Work/gitproj/coverage/report.html" 10
+blob "$SANDBOX/Work/gitproj/.turbo/cache/x" 100000
+git -C "$SANDBOX/Work/gitproj" init -q
+git -C "$SANDBOX/Work/gitproj" add package.json coverage
+git -C "$SANDBOX/Work/gitproj" -c user.name=t -c user.email=t@t commit -qm init
+find "$SANDBOX"/Work/{pyproj,gitproj} -exec touch -h -d '90 days ago' {} +
+blob "$SANDBOX/.cache/Omacom/omawrite/qmlcache/a.qmlc" 100000
+blob "$SANDBOX/.cache/Omacom/omawrite/settings.ini" 10
+blob "$SANDBOX/.local/share/zed/logs/Zed.log" 100000
+blob "$SANDBOX/.local/share/zed/extensions/installed/x" 10
+for v in 1.0.0 1.1.0 1.2.0; do blob "$SANDBOX/.copilot/pkg/linux-x64/$v/copilot" 100000; done
+touch -d '3 days ago' "$SANDBOX/.copilot/pkg/linux-x64/1.0.0"
+touch -d '2 days ago' "$SANDBOX/.copilot/pkg/linux-x64/1.1.0"
+ln -s "$SANDBOX/.copilot/pkg/linux-x64/1.1.0/copilot" "$SANDBOX/.local/bin/copilot"
+FAKE_OPEN="$SANDBOX/Downloads/held.part" oms clean --yes >/dev/null 2>&1
+check "go build cache is cleaned by go" called "go clean -cache"
+check "Qt QML caches are emptied" test ! -e "$SANDBOX/.cache/Omacom/omawrite/qmlcache/a.qmlc"
+check "Qt app settings next to the cache stay" test -f "$SANDBOX/.cache/Omacom/omawrite/settings.ini"
+check "Zed logs are emptied" test ! -e "$SANDBOX/.local/share/zed/logs/Zed.log"
+check "Zed extensions stay" test -f "$SANDBOX/.local/share/zed/extensions/installed/x"
+check "oldest Copilot CLI version is removed" test ! -e "$SANDBOX/.copilot/pkg/linux-x64/1.0.0"
+check "active and newest Copilot CLI versions stay" test -f "$SANDBOX/.copilot/pkg/linux-x64/1.1.0/copilot" -a -f "$SANDBOX/.copilot/pkg/linux-x64/1.2.0/copilot"
+check "GitHub CLI cache is cleared by gh" called "gh config clear-cache"
+check "kubectl cache is emptied" test ! -e "$SANDBOX/.kube/cache/discovery"
+check "kubectl config stays" test -f "$SANDBOX/.kube/config"
+check "OpenCode cache is emptied" test ! -e "$SANDBOX/.cache/opencode/node_modules"
+check "OpenCode sessions stay" test -f "$SANDBOX/.local/share/opencode/storage/session/s.json"
+check "browser AI models need review" test -f "$SANDBOX/.config/google-chrome/OptGuideOnDeviceModel/weights.bin"
+check "service worker storage is never touched" test -f "$SANDBOX/.config/chromium/Default/Service Worker/CacheStorage/app/cache"
+check "a stale unfinished download is removed" test ! -e "$SANDBOX/Downloads/stale.crdownload"
+check "an unfinished download still open stays" test -f "$SANDBOX/Downloads/held.part"
+check "a recent unfinished download stays" test -f "$SANDBOX/Downloads/fresh.part"
+if [[ -x /usr/bin/fuser ]]; then
+  blob "$SANDBOX/Downloads/real-open.part" 1000
+  touch -d '30 days ago' "$SANDBOX/Downloads/real-open.part"
+  exec 9<"$SANDBOX/Downloads/real-open.part"
+  FAKE_REAL_FUSER=1 oms clean --yes --only partial-downloads >/dev/null 2>&1
+  exec 9<&-
+  check "a download held open is kept with the real fuser" test -f "$SANDBOX/Downloads/real-open.part"
+fi
+mkdir -p "$SANDBOX/Work/broken"
+blob "$SANDBOX/Work/broken/package.json" 10
+blob "$SANDBOX/Work/broken/coverage/report.html" 10
+printf 'not a gitdir\n' >"$SANDBOX/Work/broken/.git"
+find "$SANDBOX/Work/broken" -exec touch -h -d '90 days ago' {} +
+oms clean --yes --all >/dev/null 2>&1
+check "a project git cannot read keeps its folders" test -f "$SANDBOX/Work/broken/coverage/report.html"
+check "browser AI models go with --all" test ! -e "$SANDBOX/.config/google-chrome/OptGuideOnDeviceModel/weights.bin"
+check "service worker storage survives --all" test -f "$SANDBOX/.config/chromium/Default/Service Worker/CacheStorage/app/cache"
+check "stale tox environments are removed" test ! -e "$SANDBOX/Work/pyproj/.tox"
+check "an untracked build folder in a git project is removed" test ! -e "$SANDBOX/Work/gitproj/.turbo"
+check "a folder git tracks is kept whatever its name" test -f "$SANDBOX/Work/gitproj/coverage/report.html"
+
+printf '\nUpdate floor\n'
+seed
+check "scan warns when / is below what omarchy update needs" grep -q "omarchy update needs" \
+  <<<"$(OMS_TEST_UPDATE_FLOOR=999999999999999 oms scan)"
+check "scan stays quiet with enough free space" test -z "$(OMS_TEST_UPDATE_FLOOR=1 oms scan | grep "omarchy update needs")"
+
+printf '\nPost-update hook\n'
+hook_notifies() {
+  local safe=$1 i
+  : >"$CALLS"
+  mkdir -p "$WORK/hookbin"
+  printf '#!/usr/bin/env bash\necho "{\\"safeBytes\\": %s}"\n' "$safe" >"$WORK/hookbin/oms"
+  # shellcheck disable=SC2016 # written into the stub as-is
+  printf '#!/usr/bin/env bash\necho "notify $*" >>"$OMS_TEST_CALLS"\n' >"$WORK/hookbin/omarchy-notification-send"
+  chmod +x "$WORK/hookbin/oms" "$WORK/hookbin/omarchy-notification-send"
+  env PATH="$WORK/hookbin:$PATH" OMS_TEST_CALLS="$CALLS" OMS_NOTIFY_GB=5 bash "$ROOT/hooks/post-update"
+  for i in {1..50}; do
+    grep -q '^notify ' "$CALLS" && return 0
+    sleep 0.1
+  done
+  return 1
+}
+hook_quiet() {
+  ! hook_notifies "$1"
+}
+check "the hook notifies when more than the threshold can be swept" hook_notifies 6000000000
+check "the hook offers a Sweep button that opens oms" grep -q -- "--action Sweep omarchy-launch-floating-terminal-with-presentation oms clean" "$CALLS"
+check "the hook stays quiet below the threshold" hook_quiet 1000
+
+printf '\nDocker without the docker group\n'
+seed
+json=$(FAKE_DOCKER_GROUP=no oms scan --json)
+check "docker is measured through sudo when it needs no password" target_is docker-build '.sudo and .bytes == 2000000000'
+FAKE_DOCKER_GROUP=no oms clean --yes --only docker-build >/dev/null 2>&1
+check "docker build cache is pruned through sudo" called "sudo -n docker builder prune -af"
+python3 -c 'import socket, sys; socket.socket(socket.AF_UNIX).bind(sys.argv[1])' "$WORK/docker.sock"
+chmod 000 "$WORK/docker.sock"
+check "docker that never stored data is not offered" jq -e '[.targets[] | select(.id == "docker-build")] | length == 0' \
+  <<<"$(FAKE_DOCKER_GROUP=no FAKE_SUDO=deny oms scan --json)"
+mkdir -p "$SANDBOX/docker-root"
+json=$(FAKE_DOCKER_GROUP=no FAKE_SUDO=deny oms scan --json)
+check "unreachable docker shows an unknown size" target_is docker-build '.bytes == -1 and .sudo'
+check "unreachable docker is not preselected" target_is docker-build '.tier == "review"'
+chmod 600 "$WORK/docker.sock"
+check "a stopped daemon the user can reach is not offered" jq -e '[.targets[] | select(.id == "docker-build")] | length == 0' \
+  <<<"$(FAKE_DOCKER_GROUP=no FAKE_SUDO=deny oms scan --json)"
+rm -f "$WORK/docker.sock"
+check "docker without a socket is not offered" jq -e '[.targets[] | select(.id == "docker-build")] | length == 0' \
+  <<<"$(FAKE_DOCKER_GROUP=no FAKE_SUDO=deny oms scan --json)"
+
 printf '\nOwn command line\n'
 seed
 FAKE_REAL_PS=1 oms clean --yes --only huggingface >/dev/null 2>&1
@@ -396,6 +529,9 @@ FAKE_MISE_EXIT=3 oms clean --yes --only mise >"$WORK/out" 2>&1
 status=$?
 check "a tool exiting with 3 is reported as failed" grep -q 'failed, see oms log' "$WORK/out"
 check "a failed sweep exits non-zero" test "$status" -ne 0
+seed
+FAKE_MISE_EXIT=3 oms clean --yes --hold --only mise >/dev/null 2>&1
+check "the hold prompt gets the exit code" called "omarchy-show-done 1"
 
 printf '\nWithout sudo\n'
 seed
@@ -423,6 +559,7 @@ check "--only without IDs is rejected" rejects clean --yes --only
 check "--only with an empty value is rejected" rejects clean --yes --only ''
 check "an empty ID in a list is rejected" rejects clean --yes --only thumbnails,,npm
 check "--skip= with an unknown ID is rejected" rejects clean --yes --skip=nope
+check "a retired target ID is ignored, not rejected" oms clean --dry-run --yes --only thumbnails,orphans
 check "sweeping without a terminal needs --yes" rejects clean
 check "rejected runs touch nothing" test ! -s "$CALLS" -a -f "$SANDBOX/.cache/thumbnails/large/a.png"
 check "--version prints the version" prints_version --version

@@ -2,7 +2,7 @@
 
 TARGET_IDS=()
 declare -A T_SECTION T_TIER T_SUDO T_LABEL T_NOTE T_BUSY T_PATHS
-declare -A R_BYTES R_STATUS R_NOTE
+declare -A R_BYTES R_STATUS R_NOTE R_TIER R_SUDO
 SCANNED=()
 BEFORE_SCAN=()
 
@@ -245,6 +245,18 @@ scan_paths() {
   return 0
 }
 
+# Run a tool's own cleanup command unless it is missing or a whitelisted path
+# sits inside its folder; then empty the target's paths around it instead.
+tool_or_paths() {
+  local id=$1 dir=$2
+  shift 2
+  if have "$1" && ! protected_inside "$dir"; then
+    run "$@"
+  else
+    clean_paths "$id"
+  fi
+}
+
 clean_paths() {
   local id=$1 path failed=0
   reset_busy_cache
@@ -261,6 +273,8 @@ scan_target() {
   SCAN_NOTE=${T_NOTE[$id]}
   SCAN_BUSY=""
   SCAN_OPEN=""
+  SCAN_TIER=${T_TIER[$id]}
+  SCAN_SUDO=${T_SUDO[$id]}
   target_whitelisted "$id" && return 1
   if declare -F "scan_$id" >/dev/null; then
     "scan_$id" || return 1
@@ -280,6 +294,8 @@ scan_target() {
     [[ -n $SCAN_OPEN ]] && SCAN_NOTE="${SCAN_NOTE:+$SCAN_NOTE · }skipping open: $SCAN_OPEN"
   fi
   R_BYTES[$id]=$SCAN_BYTES
+  R_TIER[$id]=$SCAN_TIER
+  R_SUDO[$id]=$SCAN_SUDO
   R_NOTE[$id]=${SCAN_NOTE//[$'\t\n']/ }
   SCANNED+=("$id")
 }
@@ -306,7 +322,7 @@ ranked_targets() {
   local id
   for id in "${SCANNED[@]}"; do
     local tier_rank=0 status_rank=0
-    [[ ${T_TIER[$id]} == review ]] && tier_rank=1
+    [[ ${R_TIER[$id]} == review ]] && tier_rank=1
     [[ ${R_STATUS[$id]} == busy ]] && status_rank=1
     printf '%d\t%d\t%d\t%s\n' "$status_rank" "$tier_rank" "$((-${R_BYTES[$id]}))" "$id"
   done | sort -t$'\t' -k1,1n -k2,2n -k3,3n | cut -f4

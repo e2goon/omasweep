@@ -45,7 +45,9 @@ omarchy plugin add https://github.com/e2goon/omasweep.git --enable
 </p>
 
 위젯은 안전하게 정리할 수 있는 양과 큰 항목을 보여 줍니다. **Sweep**과 **Preview**를 누르면 Omarchy의
-플로팅 터미널에서 `oms`가 열리고, 그곳에서 항목을 고르고 확인합니다.
+플로팅 터미널에서 `oms`가 열리고, 그곳에서 항목을 고르고 확인합니다. `/`의 여유 공간이 10 GB보다
+적으면(`omarchy update`가 실행을 거부하는 기준) 아이콘이 경고 색으로 바뀌고 팝업에 안내가 뜹니다. 세로
+바에서는 아이콘만 보입니다.
 
 ### CLI만
 
@@ -105,11 +107,17 @@ oms log                     # 지운 것, 건너뛴 것, 실패한 것
   덤프, 어떤 설정도 쓰지 않는 도구 버전이 여기에 속합니다. 대가는 다시 받거나 다시 빌드하는 시간뿐이며,
   미리 선택되어 있습니다.
 - **검토(review)** 대상은 눈에 띄는 대가가 있거나 원하는 것이 들어 있을 수 있습니다. 휴지통, 오프라인
-  음악, AI 모델, 셰이더 캐시(다시 만드는 동안 게임이 끊김), 프로젝트 의존성, 고아 패키지, 컨테이너
-  이미지가 여기에 속하며, 목록에만 보이고 직접 골라야 합니다.
+  음악, AI 모델, 셰이더 캐시(다시 만드는 동안 게임이 끊김), 프로젝트 의존성, 컨테이너 이미지가 여기에
+  속하며, 목록에만 보이고 직접 골라야 합니다.
 - **절대 건드리지 않는 것**: 로그인 정보, 쿠키, 방문 기록, 설정, 로컬 저장소, 메일, 게임 세이브, Wine
   prefix, Steam `compatdata`, Docker 볼륨과 컨테이너, 프로젝트 소스, Maven 저장소(직접 빌드한 결과물이
   있을 수 있음), NuGet 패키지, Ollama 모델(`ollama rm`을 쓰세요).
+- Omarchy에서 추가로 건드리지 않는 것: 브라우저 Service Worker 저장소(Omarchy 웹앱이 Chromium 프로필을
+  같이 씀), AI 에이전트 세션과 worktree(`~/.claude`, `~/.codex`, opencode 데이터. `omarchy.agents`
+  위젯이 읽음), Superwhisper 녹음과 모델, 클라우드 CLI 자격 증명(`~/.aws`), `~/Work/tries` 실험 폴더
+  통째, AppImage, Omarchy 자체 상태, 스냅샷.
+- 고아 패키지는 `omarchy update`가 업데이트할 때마다 지우므로 맡겨 둡니다. 예전 `orphans` ID는
+  `--only`와 `--skip`에서 계속 받아들이며, 안내만 하고 무시합니다.
 - 도구에 자체 정리 명령이 있으면 그 데이터를 직접 지우지 않고 그 명령을 호출합니다.
 - 실행 중인 앱의 캐시는 건너뜁니다. Chromium 계열 브라우저와 Electron 앱은 프로필의 `SingletonLock`,
   Firefox 계열 브라우저는 프로필의 `lock`, Flatpak 앱은 `flatpak ps`, 나머지는 프로세스 이름으로
@@ -121,13 +129,13 @@ oms log                     # 지운 것, 건너뛴 것, 실패한 것
 
 | ID | 대상 | 등급 | 방법 |
 | --- | --- | --- | --- |
-| `pacman` | 오래된 패키지 버전 | safe, sudo | `paccache -rk2`와 `paccache -ruk0` |
+| `pacman` | 삭제한 패키지의 캐시와 두 개를 넘는 옛 버전(`omarchy update`가 이미 정리함) | safe, sudo | `paccache -rk2`와 `paccache -ruk0` |
 | `pacman-downloads` | 중단된 업데이트가 pacman 캐시에 남긴 `download-*` 폴더 | safe, sudo | 삭제 |
 | `journal` | 4주가 지난 저널 보관 파일 | safe, sudo | `journalctl --vacuum-time=4weeks` |
 | `coredumps` | `systemd-coredump` 보관 파일 | safe, sudo | `/var/lib/systemd/coredump`의 파일 삭제 |
 | `flatpak-unused` | 설치된 앱이 쓰지 않는 Flatpak 런타임 | safe, sudo | `flatpak uninstall --unused`(사용자와 시스템) |
 | `thumbnails` | 썸네일 캐시 | safe | `~/.cache/thumbnails` 비우기 |
-| `orphans` | 의존성으로 설치됐지만 이제 아무도 쓰지 않는 패키지 | review, sudo | `pacman -Qdtq` 목록에 `pacman -Rns` |
+| `partial-downloads` | 다운로드 폴더에서 7일간 손대지 않았고 열려 있지 않은 `.crdownload`, `.part` 파일(`fuser` 필요) | safe | 파일 삭제 |
 | `trash` | 휴지통 | review | `~/.local/share/Trash` 비우기 |
 | `installers` | 다운로드 폴더에서 30일간 손대지 않은 `.deb`, `.rpm`, `.pkg.tar.*`, `.iso`, `.dmg`, `.exe`, `.msi` | review | 파일 삭제 |
 
@@ -139,22 +147,29 @@ oms log                     # 지운 것, 건너뛴 것, 실패한 것
 | `docker-images` | 컨테이너가 쓰지 않는 모든 이미지(일부러 받아 둔 것 포함) | review | `docker image prune -af` |
 | `podman-images` | Podman의 같은 항목 | review | `podman image prune -af` |
 
+Omarchy 4.5는 사용자를 `docker` 그룹에 넣지 않아 Docker를 `sudo`로 씁니다. 그 순간 sudo에 비밀번호가
+필요 없으면 `sudo -n docker`로 크기를 재고 정리합니다. 그렇지 않으면 Docker에 저장된 데이터가 있을 때만
+Docker 항목이 크기 미상으로 보이고, sudo를 요구하며, 직접 골라야 합니다. Omarchy가 소켓을 켜 두더라도
+한 번도 실행하지 않은 Docker는 목록에 나오지 않습니다.
+
 ### 개발 도구
 
 | ID | 대상 | 등급 | 방법 |
 | --- | --- | --- | --- |
 | `mise` | 어떤 mise 설정도 쓰지 않는 도구 버전 | safe | `mise prune` |
 | `mise-cache` | mise 다운로드 캐시 | safe | `mise cache clear` |
-| `ai-cli-versions` | Claude Code와 Cursor Agent의 옛 빌드(사용 중인 버전과 직전 버전 하나는 남김) | safe | 옛 빌드 삭제 |
+| `ai-cli-versions` | Claude Code, Cursor Agent, GitHub Copilot CLI의 옛 빌드(사용 중인 버전과 직전 버전 하나는 남김) | safe | 옛 빌드 삭제 |
 | `aur` | yay, paru, pikaur 빌드 클론 | safe | 캐시 폴더 비우기 |
 | `npm`, `pnpm`, `yarn`, `bun`, `deno`, `corepack` | JavaScript 패키지 캐시 | safe | 캐시 폴더 비우기 |
 | `pnpm-store` | 어떤 프로젝트도 링크하지 않는 저장소 패키지 | safe | `pnpm store prune` |
 | `uv`, `pip`, `poetry` | Python 패키지 캐시 | safe | `uv cache prune`, 나머지는 비우기 |
-| `go-build` | Go 빌드 캐시 | safe | `~/.cache/go-build` 비우기 |
+| `go-build` | Go 빌드 캐시 | safe | `go clean -cache` |
 | `cargo`, `rustup` | crate 압축 파일과 rustup 다운로드(소스와 툴체인은 남김) | safe | 폴더 비우기 |
 | `gradle` | Gradle 빌드 캐시와 데몬 로그(받아 둔 의존성은 남김) | safe | 폴더 비우기 |
 | `composer`, `ruby`, `dotnet`, `beam`, `jvm-tools`, `zig`, `ccache`, `opam`, `android` | Composer, RubyGems와 Bundler, NuGet HTTP, Hex와 rebar3, Coursier, Zig, ccache, opam, Android 빌드 캐시 | safe | 캐시 폴더 비우기 |
-| `tool-caches` | node-gyp, Electron, TypeScript, Vite, webpack, ESLint, Prettier, Ruff, mypy, pre-commit | safe | 캐시 폴더 비우기 |
+| `tool-caches` | node-gyp, Electron, TypeScript, Vite, webpack, ESLint, Prettier, Ruff, mypy, pre-commit, Prisma, pyenv 다운로드 | safe | 캐시 폴더 비우기 |
+| `gh` | GitHub CLI API 캐시 | safe | `gh config clear-cache` |
+| `cloud-cli` | kubectl discovery 캐시, gcloud와 Azure CLI 로그(자격 증명과 설정은 남김) | safe | 폴더 비우기 |
 | `go-mod` | Go 모듈 캐시 | review | `go clean -modcache` |
 | `test-browsers` | Playwright, Puppeteer, Cypress 브라우저 | review | 캐시 폴더 비우기 |
 | `jetbrains` | JetBrains IDE 캐시와 인덱스 | review | `~/.cache/JetBrains` 비우기 |
@@ -165,6 +180,7 @@ oms log                     # 지운 것, 건너뛴 것, 실패한 것
 | --- | --- | --- | --- |
 | `chromium`, `chrome`, `edge`, `brave`, `vivaldi`, `opera` | `~/.cache/<브라우저>`와 프로필 안의 코드, GPU, 셰이더 캐시 | safe | 캐시 폴더 비우기 |
 | `firefox`, `zen`, `librewolf` | `~/.cache/<브라우저>` | safe | 캐시 폴더 비우기 |
+| `browser-ai-models` | Chrome, Edge, Chromium, Brave 프로필의 온디바이스 AI 모델(`OptGuideOnDeviceModel`), 수 GB가 되기도 함 | review | 모델 폴더 비우기 |
 
 ### 앱
 
@@ -174,6 +190,8 @@ oms log                     # 지운 것, 건너뛴 것, 실패한 것
 | `flatpak-caches` | `~/.var/app/*/cache` | safe | 캐시 폴더 비우기 |
 | `spotify` | Spotify 캐시(오프라인 저장한 곡 포함) | review | `~/.cache/spotify` 비우기 |
 | `kdenlive` | Kdenlive 프록시 클립과 미리 보기 | review | `~/.cache/kdenlive` 비우기 |
+| `qt-caches` | Qt Quick 앱의 컴파일된 QML과 셰이더 캐시(Omarchy의 omawrite, omacalc, hype, monologue, omacut 포함) | safe | `qmlcache`, `qtshadercache-*`, `qtpipelinecache-*` 비우기 |
+| `zed` | Zed 임시 파일, 로그, npm 캐시(확장, 언어 서버, 설정은 남김) | safe | 폴더 비우기 |
 | `gpu-shaders` | Mesa, RADV, NVIDIA 셰이더 캐시 | review | 캐시 폴더 비우기 |
 
 ### 게임
@@ -191,20 +209,39 @@ oms log                     # 지운 것, 건너뛴 것, 실패한 것
 | `huggingface` | Hugging Face hub 캐시 | review | 캐시 폴더 비우기 |
 | `ml-models` | PyTorch hub와 Whisper 모델 | review | 캐시 폴더 비우기 |
 | `lmstudio` | LM Studio 모델 | review | 모델 폴더 비우기 |
+| `opencode` | OpenCode 프로바이더 패키지와 도구(세션은 남김) | safe | `~/.cache/opencode` 비우기 |
 
 ### 프로젝트
 
 | ID | 대상 | 등급 | 방법 |
 | --- | --- | --- | --- |
-| `project-artifacts` | 30일간 손대지 않은 프로젝트의 `node_modules`, `.next`, `.nuxt`, `.svelte-kit`, `.turbo`, `.parcel-cache`, `.angular`, Rust와 Maven `target`, Python `.venv`/`venv`, `.gradle`, `.dart_tool`, Composer `vendor` | review | 폴더 삭제 |
+| `project-artifacts` | 30일간 손대지 않은 프로젝트의 `node_modules`, `.next`, `.nuxt`, `.output`, `.svelte-kit`, `.astro`, `.expo`, `.turbo`, `.parcel-cache`, `.angular`, `coverage`, Rust와 Maven `target`, Python `.venv`/`venv`, `.tox`, `.nox`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`, `.gradle`, `.cxx`, `.dart_tool`, Zig `.zig-cache`/`zig-out`, Composer `vendor` | review | 폴더 삭제 |
 
 폴더 옆에 프로젝트 표식 파일(`package.json`, `Cargo.toml`, `pyvenv.cfg`, `composer.json` 등)이 있을 때만
 대상이 됩니다. 가장 바깥쪽 폴더만 고르고, `$HOME` 바로 아래 폴더는 무시합니다. `deploy` 폴더(Solana 키)가
-있는 `target`은 남기고, Go나 Rails의 `vendor` 폴더는 건드리지 않습니다. 지우기 직전에 프로젝트를 한 번
-더 확인합니다.
+있는 `target`은 남기고, Go나 Rails의 `vendor` 폴더는 건드리지 않습니다. 이름과 상관없이 git이 추적하는
+파일이 든 폴더는 남기므로, 커밋된 `coverage` 리포트나 vendored 코드는 지워지지 않습니다. `dist`, `build`,
+`bin`, `obj`는 커밋된 결과물인 경우가 많아 대상에서 뺐습니다. 지우기 직전에 프로젝트를 한 번 더
+확인합니다.
 
 Btrfs 스냅샷은 지우지 않습니다. snapper가 관리하는 루트에서 기대보다 적게 비워졌다면 `sudo snapper
 list`를 확인해 보라고 알려 줍니다.
+
+## omarchy update 이후
+
+`omarchy update`는 `/`에 10 GB 이상 비어 있어야 시작합니다. 여유 공간이 그보다 적으면 `oms scan`,
+`oms clean`, 위젯이 알려 줍니다.
+
+업데이트할 때마다 `mise up`이 돌고 새 패키지를 받으므로 캐시가 쌓입니다. 선택 사항인 훅을 설치하면
+업데이트가 끝난 뒤 백그라운드에서 스캔하고, 안전하게 정리할 양이 `OMS_NOTIFY_GB`(기본 5)를 넘으면
+**Sweep** 버튼이 달린 알림을 보냅니다. 훅이 직접 지우는 것은 없습니다.
+
+```bash
+install -Dm644 ~/.config/omarchy/plugins/io.github.e2goon.omasweep/hooks/post-update \
+  ~/.config/omarchy/hooks/post-update.d/omasweep
+```
+
+끄려면 그 파일을 지우면 됩니다.
 
 ## 화이트리스트
 
@@ -227,6 +264,7 @@ docker-images
 | `OMS_JOURNAL_KEEP` | `4weeks` | `journalctl --vacuum-time`으로 남길 저널 기간 |
 | `OMS_STALE_DAYS` | `30` | 프로젝트 빌드 결과물이나 내려받은 설치 파일을 오래된 것으로 보는 날 수 |
 | `OMS_PROJECT_DIRS` | `~/Projects:~/projects:~/Code:~/code:~/src:~/dev:~/Work:~/work` | 프로젝트 빌드 결과물을 찾을 위치 |
+| `OMS_NOTIFY_GB` | `5` | post-update 훅이 알림을 보내는 안전 정리량 기준(GB) |
 | `NO_COLOR` | 없음 | 색 끄기 |
 
 위젯에는 설정이 두 개 있습니다. `showSize`는 아이콘 옆에 안전하게 정리할 수 있는 총량을 보여 주고,
@@ -258,7 +296,7 @@ tests/run.sh
 
 - 문법을 검사하고, `shellcheck`가 있으면 실행합니다(`uvx --from shellcheck-py shellcheck`도 됩니다).
   Omarchy 셸 모듈을 기준으로 `qmllint`를 돌리고 플러그인 매니페스트를 검사합니다.
-- `sudo`, `paccache`, `pacman`, `journalctl`, `mise`, `docker`, `uv`, `go`, `pnpm`, `flatpak`, `ps`를
+- `sudo`, `paccache`, `pacman`, `journalctl`, `mise`, `docker`, `uv`, `go`, `gh`, `fuser`, `pnpm`, `flatpak`, `ps`를
   인자만 기록하는 가짜 명령으로 바꿔서, 모든 정리 명령을 정확히 검증합니다.
 - 버려도 되는 홈 폴더에서 실제로 정리해 보고, 지워져야 할 것과 남아야 할 것(화이트리스트 경로, 심볼릭
   링크 대상, 실행 중인 앱의 캐시, 최근 프로젝트, `$HOME` 밖의 모든 것)을 확인합니다.
