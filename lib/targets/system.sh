@@ -9,16 +9,16 @@ if [[ ${OMS_TEST:-} == 1 ]]; then
   PACMAN_CACHE_DIR=${OMS_PACMAN_CACHE_DIR:-$PACMAN_CACHE_DIR}
 fi
 
-target pacman "System" safe 1 "Old package versions" "keeps the newest $OMS_PACMAN_KEEP like omarchy update" "pacman yay paru"
+target pacman "System" safe 1 "Old package versions" "removed packages, plus versions past $OMS_PACMAN_KEEP (omarchy update prunes those too)" "pacman yay paru"
 target pacman-downloads "System" safe 1 "Partial package downloads" "download-* folders pacman left behind" "pacman yay paru"
 target journal "System" safe 1 "Archived journal logs" "older than $OMS_JOURNAL_KEEP"
 target coredumps "System" safe 1 "Crash dumps" "systemd-coredump archive"
 target flatpak-unused "System" safe 1 "Unused Flatpak runtimes" "runtimes no installed app needs" "flatpak"
 target thumbnails "System" safe 0 "Thumbnail cache" "regenerated on demand"
 paths thumbnails "$CACHE/thumbnails" "$HOME/.thumbnails"
-target orphans "System" review 1 "Orphaned packages" "installed as dependencies and no longer needed" "pacman yay paru"
 target trash "System" review 0 "Trash" "files you deleted"
 paths trash "$DATA/Trash/files" "$DATA/Trash/info" "$DATA/Trash/expunged"
+target partial-downloads "System" safe 0 "Unfinished downloads" "browser .crdownload and .part files, untouched for 7+ days and not open"
 target installers "System" review 0 "Old installers" "packages and disk images in Downloads, untouched for $OMS_STALE_DAYS+ days"
 
 scan_pacman() {
@@ -91,30 +91,6 @@ clean_flatpak-unused() {
     run sudo -n flatpak uninstall --system --unused --noninteractive
 }
 
-ORPHANS=()
-
-scan_orphans() {
-  have pacman || return 1
-  mapfile -t ORPHANS < <(pacman -Qdtq 2>/dev/null)
-  ((${#ORPHANS[@]})) || return 1
-  SCAN_BYTES=0
-  local size
-  while IFS= read -r size; do
-    SCAN_BYTES=$((SCAN_BYTES + $(iec_to_bytes "$size")))
-  done < <(LC_ALL=C pacman -Qi "${ORPHANS[@]}" 2>/dev/null | sed -n 's/^Installed Size *: *//p')
-  SCAN_NOTE="$(plural ${#ORPHANS[@]} package): $(preview_list 4 "${ORPHANS[@]}")"
-}
-
-clean_orphans() {
-  local current=() still=() name
-  mapfile -t current < <(pacman -Qdtq 2>/dev/null)
-  for name in "${ORPHANS[@]}"; do
-    [[ " ${current[*]} " == *" $name "* ]] && still+=("$name")
-  done
-  ((${#still[@]})) || return 0
-  run sudo -n pacman -Rns --noconfirm "${still[@]}"
-}
-
 INSTALLERS=()
 
 downloads_dir() {
@@ -142,6 +118,47 @@ clean_installers() {
   for file in "${INSTALLERS[@]}"; do
     if [[ -z $(find "$file" -maxdepth 0 -type f -mtime +"$OMS_STALE_DAYS" -ctime +"$OMS_STALE_DAYS" 2>/dev/null) ]]; then
       oplog "SKIPPED $file, changed since the scan"
+      continue
+    fi
+    remove_path "$file" || failed=1
+  done
+  return "$failed"
+}
+
+PARTIALS=()
+
+partial_open() {
+  have fuser || return 0
+  fuser -s -- "$1" 2>/dev/null
+}
+
+stale_partials() {
+  local dir file
+  dir=$(downloads_dir)
+  [[ -d $dir ]] || return 0
+  while IFS= read -r -d '' file; do
+    partial_open "$file" && continue
+    printf '%s\n' "$file"
+  done < <(find "$dir" -maxdepth 1 -type f \( -name '*.crdownload' -o -name '*.part' \) -mtime +7 -print0 2>/dev/null)
+}
+
+scan_partial-downloads() {
+  # Without fuser an open download cannot be told apart, so offer nothing.
+  have fuser || return 1
+  mapfile -t PARTIALS < <(stale_partials)
+  ((${#PARTIALS[@]})) || return 1
+  SCAN_BYTES=$(size_of "${PARTIALS[@]}")
+  ((SCAN_BYTES > 0)) || SCAN_BYTES=4096
+  local names=("${PARTIALS[@]##*/}")
+  SCAN_NOTE="$(plural ${#PARTIALS[@]} file): $(preview_list 2 "${names[@]}")"
+}
+
+clean_partial-downloads() {
+  local file current=() failed=0
+  mapfile -t current < <(stale_partials)
+  for file in "${PARTIALS[@]}"; do
+    if ! in_list "$file" "${current[@]}"; then
+      oplog "SKIPPED $file, opened or changed since the scan"
       continue
     fi
     remove_path "$file" || failed=1
