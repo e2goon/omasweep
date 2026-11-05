@@ -93,6 +93,13 @@ size_of() {
   return 0
 }
 
+# Size of things a scan found. Found but empty still counts as one block, so
+# the target is offered instead of dropped as nothing to sweep.
+found_bytes() {
+  SCAN_BYTES=$(size_of "$@")
+  ((SCAN_BYTES > 0)) || SCAN_BYTES=4096
+}
+
 file_bytes() {
   find "$@" -printf '%s\n' 2>/dev/null | awk '{ s += $1 } END { print s + 0 }'
   return 0

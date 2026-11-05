@@ -2,48 +2,51 @@
 
 target project-artifacts "Projects" review 0 "Stale project builds" "untouched for $OMS_STALE_DAYS+ days"
 
-ARTIFACT_NAMES=(node_modules target .venv venv .next .nuxt .svelte-kit .turbo .parcel-cache .angular .gradle .dart_tool vendor
-  .output .astro .expo coverage .tox .nox .pytest_cache .mypy_cache .ruff_cache .zig-cache zig-out .cxx)
-ARTIFACT_MATCH=(-name "${ARTIFACT_NAMES[0]}")
-for name in "${ARTIFACT_NAMES[@]:1}"; do
-  ARTIFACT_MATCH+=(-o -name "$name")
+# Each build folder name and the project file that must sit next to it. Globs
+# work. A folder only counts when one of its markers is present.
+JS_MARKER=package.json
+PY_MARKERS="pyproject.toml setup.py setup.cfg tox.ini noxfile.py"
+declare -A ARTIFACT_MARKERS=(
+  [node_modules]=$JS_MARKER [.next]=$JS_MARKER [.nuxt]=$JS_MARKER [.output]=$JS_MARKER
+  [.svelte-kit]=$JS_MARKER [.astro]=$JS_MARKER [.expo]=$JS_MARKER [.turbo]=$JS_MARKER
+  [.parcel-cache]=$JS_MARKER [.angular]=$JS_MARKER [coverage]=$JS_MARKER
+  [.tox]=$PY_MARKERS [.nox]=$PY_MARKERS [.pytest_cache]=$PY_MARKERS
+  [.mypy_cache]=$PY_MARKERS [.ruff_cache]=$PY_MARKERS
+  [target]="Cargo.toml pom.xml"
+  [.gradle]="build.gradle* settings.gradle*" [.cxx]="build.gradle*"
+  [.zig-cache]=build.zig [zig-out]=build.zig
+  [.dart_tool]=pubspec.yaml
+  [vendor]=composer.json
+  [.venv]="" [venv]=""
+)
+unset JS_MARKER PY_MARKERS
+
+ARTIFACT_MATCH=()
+for name in "${!ARTIFACT_MARKERS[@]}"; do
+  ARTIFACT_MATCH+=(${ARTIFACT_MATCH[0]+-o} -name "$name")
 done
 unset name
 
 ARTIFACTS=()
 
 artifact_kind() {
-  local dir=$1 parent=${1%/*}
-  case ${dir##*/} in
-    node_modules | .next | .nuxt | .svelte-kit | .turbo | .parcel-cache | .angular | .output | .astro | .expo | coverage)
-      [[ -f $parent/package.json ]]
-      ;;
-    .tox | .nox | .pytest_cache | .mypy_cache | .ruff_cache)
-      [[ -f $parent/pyproject.toml || -f $parent/setup.py || -f $parent/setup.cfg || -f $parent/tox.ini || -f $parent/noxfile.py ]]
-      ;;
-    .zig-cache | zig-out)
-      [[ -f $parent/build.zig ]]
-      ;;
-    .cxx)
-      compgen -G "$parent/build.gradle*" >/dev/null
-      ;;
-    target)
-      [[ -f $parent/Cargo.toml || -f $parent/pom.xml ]] && [[ ! -d $dir/deploy ]]
-      ;;
+  local dir=$1 parent=${1%/*} name=${1##*/} markers=() marker
+  [[ -n ${ARTIFACT_MARKERS[$name]+set} ]] || return 1
+  case $name in
     .venv | venv)
       [[ -f $dir/pyvenv.cfg ]]
+      return
       ;;
-    .gradle)
-      compgen -G "$parent/build.gradle*" >/dev/null || compgen -G "$parent/settings.gradle*" >/dev/null
+    target)
+      # Solana keeps program keys in target/deploy.
+      [[ -d $dir/deploy ]] && return 1
       ;;
-    .dart_tool)
-      [[ -f $parent/pubspec.yaml ]]
-      ;;
-    vendor)
-      [[ -f $parent/composer.json ]]
-      ;;
-    *) return 1 ;;
   esac
+  read -r -a markers <<<"${ARTIFACT_MARKERS[$name]}"
+  for marker in "${markers[@]}"; do
+    compgen -G "$parent/$marker" >/dev/null && return 0
+  done
+  return 1
 }
 
 # A folder git tracks files in is part of the project, whatever its name says

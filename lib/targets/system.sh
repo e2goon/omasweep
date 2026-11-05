@@ -43,8 +43,7 @@ scan_pacman-downloads() {
   [[ -d $PACMAN_CACHE_DIR ]] || return 1
   mapfile -t PACMAN_DOWNLOADS < <(find "$PACMAN_CACHE_DIR" -mindepth 1 -maxdepth 1 -type d -name 'download-*' 2>/dev/null)
   ((${#PACMAN_DOWNLOADS[@]})) || return 1
-  SCAN_BYTES=$(size_of "${PACMAN_DOWNLOADS[@]}")
-  ((SCAN_BYTES > 0)) || SCAN_BYTES=4096
+  found_bytes "${PACMAN_DOWNLOADS[@]}"
 }
 
 clean_pacman-downloads() {
@@ -152,8 +151,7 @@ scan_partial-downloads() {
     fuser -s "$file" 2>/dev/null || PARTIALS+=("$file")
   done < <(downloads_find "${PARTIAL_TESTS[@]}")
   ((${#PARTIALS[@]})) || return 1
-  SCAN_BYTES=$(size_of "${PARTIALS[@]}")
-  ((SCAN_BYTES > 0)) || SCAN_BYTES=4096
+  found_bytes "${PARTIALS[@]}"
   local names=("${PARTIALS[@]##*/}")
   SCAN_NOTE="$(plural ${#PARTIALS[@]} file): $(preview_list 2 "${names[@]}")"
 }
