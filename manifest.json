@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.e2goon.omasweep",
   "name": "omasweep",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "e2goon",
   "license": "MIT",
   "description": "Reclaim disk space on Omarchy: package caches, old tool versions, Docker, developer and browser caches.",
