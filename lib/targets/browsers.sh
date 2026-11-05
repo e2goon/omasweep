@@ -26,3 +26,11 @@ chromium_browser opera "Opera" "$CACHE/opera" "$CONFIG/opera" "opera"
 firefox_browser firefox "Firefox" "$CACHE/mozilla" "$HOME/.mozilla/firefox" "firefox"
 firefox_browser zen "Zen" "$CACHE/zen" "$HOME/.zen" "zen zen-bin"
 firefox_browser librewolf "LibreWolf" "$CACHE/librewolf" "$HOME/.librewolf" "librewolf"
+
+# Chrome and Edge keep on-device AI models (Gemini Nano and friends) at the top
+# of the profile. They download again, often several GB, so this stays opt-in.
+target browser-ai-models "Browsers" review 0 "Browser AI models" "on-device models, several GB downloaded again when a feature needs them"
+for browser_dir in "$CONFIG/google-chrome" "$CONFIG/microsoft-edge" "$CONFIG/chromium" "$CONFIG/BraveSoftware/Brave-Browser"; do
+  app_path browser-ai-models "$browser_dir/OptGuideOnDeviceModel" "${browser_dir##*/}" "$(lock_token "$browser_dir/SingletonLock")"
+done
+unset browser_dir

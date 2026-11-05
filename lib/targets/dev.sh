@@ -56,10 +56,15 @@ target opam "Developer tools" safe 0 "opam download cache" "OCaml package archiv
 paths opam "$HOME/.opam/download-cache"
 target android "Developer tools" safe 0 "Android build cache" "SDK and emulators stay" "match:gradle"
 paths android "$HOME/.android/cache" "$HOME/.android/build-cache"
-target tool-caches "Developer tools" safe 0 "Small tool caches" "node-gyp, Electron, TypeScript, Vite, ESLint, Prettier, Ruff, mypy, pre-commit"
+target tool-caches "Developer tools" safe 0 "Small tool caches" "node-gyp, Electron, TypeScript, Vite, ESLint, Prettier, Ruff, mypy, pre-commit, Prisma, pyenv"
 paths tool-caches "$CACHE/node-gyp" "$HOME/.node-gyp" "$CACHE/electron" "$CACHE/electron-builder" \
   "$CACHE/typescript" "$CACHE/vite" "$CACHE/webpack" "$CACHE/eslint" "$CACHE/prettier" \
-  "$CACHE/ruff" "$CACHE/mypy" "$CACHE/pre-commit"
+  "$CACHE/ruff" "$CACHE/mypy" "$CACHE/pre-commit" "$CACHE/prisma" "$HOME/.pyenv/cache"
+
+target gh "Developer tools" safe 0 "GitHub CLI cache" "gh config clear-cache" "gh"
+paths gh "$CACHE/gh"
+target cloud-cli "Developer tools" safe 0 "Cloud CLI caches and logs" "kubectl discovery cache, gcloud and Azure logs, credentials stay" "kubectl gcloud az"
+paths cloud-cli "$HOME/.kube/cache" "$HOME/.kube/http-cache" "$CONFIG/gcloud/logs" "$HOME/.azure/logs"
 
 target test-browsers "Developer tools" review 0 "Test browsers" "Playwright, Puppeteer, Cypress, downloaded again on next run" "match:playwright match:puppeteer Cypress"
 paths test-browsers "$CACHE/ms-playwright" "$CACHE/puppeteer" "$CACHE/Cypress"
@@ -159,5 +164,21 @@ clean_go-mod() {
     run go clean -modcache
   else
     clear_contents "$dir"
+  fi
+}
+
+clean_go-build() {
+  if have go && ! protected_inside "$CACHE/go-build" && [[ $(go env GOCACHE 2>/dev/null) == "$CACHE/go-build" ]]; then
+    run go clean -cache
+  else
+    clean_paths go-build
+  fi
+}
+
+clean_gh() {
+  if have gh && ! protected_inside "$CACHE/gh"; then
+    run gh config clear-cache
+  else
+    clean_paths gh
   fi
 }
