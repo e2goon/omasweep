@@ -1,0 +1,34 @@
+#!/bin/bash
+
+# omasweep post-update hook for Omarchy.
+#
+# omarchy update runs `mise up` and pulls new packages every time, so caches and
+# old tool versions pile up. After an update this scans in the background and
+# sends a notification when more than OMS_NOTIFY_GB (default 5) can be swept
+# safely. It never deletes anything; the notification's Sweep button opens oms.
+#
+# Install:
+#   install -Dm644 ~/.config/omarchy/plugins/io.github.e2goon.omasweep/hooks/post-update \
+#     ~/.config/omarchy/hooks/post-update.d/omasweep
+
+threshold_gb=${OMS_NOTIFY_GB:-5}
+[[ $threshold_gb =~ ^[0-9]+$ ]] || exit 0
+command -v oms >/dev/null 2>&1 || exit 0
+command -v jq >/dev/null 2>&1 || exit 0
+
+# Detached, so the update finishes without waiting for the scan.
+# shellcheck disable=SC2016 # expanded by the detached shell
+setsid bash -c '
+  threshold=$(( $1 * 1073741824 ))
+  safe=$(nice -n 19 ionice -c 3 oms scan --json 2>/dev/null | jq -r ".safeBytes // 0") || exit 0
+  [[ $safe =~ ^[0-9]+$ ]] && (( safe >= threshold )) || exit 0
+  size=$(numfmt --to=iec --suffix=B "$safe")
+  if command -v omarchy-notification-send >/dev/null 2>&1; then
+    omarchy-notification-send --app-name omasweep -g 󰃢 "$size can be swept" "Caches and old versions piled up by the update" \
+      --action Sweep omarchy-launch-floating-terminal-with-presentation oms clean
+  else
+    notify-send -a omasweep "$size can be swept" "Run oms to pick and sweep"
+  fi
+' _ "$threshold_gb" >/dev/null 2>&1 </dev/null &
+disown 2>/dev/null || true
+exit 0

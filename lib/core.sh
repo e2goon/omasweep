@@ -128,8 +128,12 @@ si_to_bytes() {
   numfmt --from=si "$value" 2>/dev/null || printf '0'
 }
 
+# omarchy update refuses to start with less than this free on /.
+OMS_UPDATE_FLOOR=10737418240
+[[ ${OMS_TEST:-} == 1 ]] && OMS_UPDATE_FLOOR=${OMS_TEST_UPDATE_FLOOR:-$OMS_UPDATE_FLOOR}
+
 free_bytes() {
-  df -B1 --output=avail "$HOME" 2>/dev/null | awk 'NR == 2 { print $1 + 0 } END { if (NR < 2) print 0 }'
+  df -B1 --output=avail "${1:-$HOME}" 2>/dev/null | awk 'NR == 2 { print $1 + 0 } END { if (NR < 2) print 0 }'
 }
 
 open_oplog() {

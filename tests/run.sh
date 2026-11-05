@@ -273,11 +273,11 @@ EOF
 make_stubs
 
 printf '\nStatic checks\n'
-for file in "$OMS" "$ROOT"/lib/*.sh "$ROOT"/lib/targets/*.sh "$ROOT"/tests/*.sh; do
+for file in "$OMS" "$ROOT"/lib/*.sh "$ROOT"/lib/targets/*.sh "$ROOT"/tests/*.sh "$ROOT"/hooks/*; do
   check "bash -n ${file#"$ROOT"/}" bash -n "$file"
 done
 if command -v shellcheck >/dev/null 2>&1; then
-  check "shellcheck" shellcheck -x "$OMS" "$ROOT"/lib/*.sh "$ROOT"/lib/targets/*.sh "$ROOT"/tests/*.sh
+  check "shellcheck" shellcheck -x "$OMS" "$ROOT"/lib/*.sh "$ROOT"/lib/targets/*.sh "$ROOT"/tests/*.sh "$ROOT"/hooks/*
 fi
 if command -v omarchy >/dev/null 2>&1; then
   check "omarchy plugin validate" omarchy plugin validate "$ROOT"
@@ -437,6 +437,35 @@ check "service worker storage survives --all" test -f "$SANDBOX/.config/chromium
 check "stale tox environments are removed" test ! -e "$SANDBOX/Work/pyproj/.tox"
 check "an untracked build folder in a git project is removed" test ! -e "$SANDBOX/Work/gitproj/.turbo"
 check "a folder git tracks is kept whatever its name" test -f "$SANDBOX/Work/gitproj/coverage/report.html"
+
+printf '\nUpdate floor\n'
+seed
+check "scan warns when / is below what omarchy update needs" grep -q "omarchy update needs" \
+  <<<"$(OMS_TEST_UPDATE_FLOOR=999999999999999 oms scan)"
+check "scan stays quiet with enough free space" test -z "$(OMS_TEST_UPDATE_FLOOR=1 oms scan | grep "omarchy update needs")"
+
+printf '\nPost-update hook\n'
+hook_notifies() {
+  local safe=$1 i
+  : >"$CALLS"
+  mkdir -p "$WORK/hookbin"
+  printf '#!/usr/bin/env bash\necho "{\\"safeBytes\\": %s}"\n' "$safe" >"$WORK/hookbin/oms"
+  # shellcheck disable=SC2016 # written into the stub as-is
+  printf '#!/usr/bin/env bash\necho "notify $*" >>"$OMS_TEST_CALLS"\n' >"$WORK/hookbin/omarchy-notification-send"
+  chmod +x "$WORK/hookbin/oms" "$WORK/hookbin/omarchy-notification-send"
+  env PATH="$WORK/hookbin:$PATH" OMS_TEST_CALLS="$CALLS" OMS_NOTIFY_GB=5 bash "$ROOT/hooks/post-update"
+  for i in {1..50}; do
+    grep -q '^notify ' "$CALLS" && return 0
+    sleep 0.1
+  done
+  return 1
+}
+hook_quiet() {
+  ! hook_notifies "$1"
+}
+check "the hook notifies when more than the threshold can be swept" hook_notifies 6000000000
+check "the hook offers a Sweep button that opens oms" grep -q -- "--action Sweep omarchy-launch-floating-terminal-with-presentation oms clean" "$CALLS"
+check "the hook stays quiet below the threshold" hook_quiet 1000
 
 printf '\nDocker without the docker group\n'
 seed
