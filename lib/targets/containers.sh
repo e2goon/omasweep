@@ -16,16 +16,14 @@ DOCKER_ROOT=/var/lib/docker
 # through sudo that needs no password right now, or not at all.
 engine_df() {
   local engine=$1 cmd=("$1")
-  if ! timeout 5 "$engine" info >/dev/null 2>&1; then
-    if [[ $engine == docker ]] && sudo -n true 2>/dev/null && timeout 5 sudo -n docker info >/dev/null 2>&1; then
-      cmd=(sudo -n docker)
-      printf 'mode\tsudo\n'
-    else
-      [[ $engine == docker && -d $DOCKER_ROOT ]] && printf 'mode\tdenied\n'
-      return 0
-    fi
-  else
+  if timeout 5 "$engine" info >/dev/null 2>&1; then
     printf 'mode\tuser\n'
+  elif [[ $engine == docker ]] && timeout 5 sudo -n docker info >/dev/null 2>&1; then
+    cmd=(sudo -n docker)
+    printf 'mode\tsudo\n'
+  else
+    [[ $engine == docker && -d $DOCKER_ROOT ]] && printf 'mode\tdenied\n'
+    return 0
   fi
   timeout 20 "${cmd[@]}" system df --format '{{.Type}}\t{{.Reclaimable}}' 2>/dev/null
 }
@@ -52,61 +50,58 @@ engine_ready() {
     else
       ENGINE_DF[$engine]=$(engine_df "$engine")
     fi
-    ENGINE_MODE[$engine]=$(awk -F'\t' '$1 == "mode" { print $2; exit }' <<<"${ENGINE_DF[$engine]}")
+    local line=${ENGINE_DF[$engine]%%$'\n'*}
+    [[ $line == mode$'\t'* ]] && ENGINE_MODE[$engine]=${line#*$'\t'}
   fi
-  [[ -n ${ENGINE_MODE[$engine]} ]]
+  [[ -n ${ENGINE_MODE[$engine]:-} ]]
 }
 
 before_scan prefetch_engines
 
 engine_reclaimable() {
-  local engine=$1 type=$2 id=$3 value
+  local engine=$1 type=$2 value
   engine_ready "$engine" || return 1
-  case ${ENGINE_MODE[$engine]} in
-    sudo) T_SUDO["$id"]=1 ;;
-    denied)
-      # Unmeasurable without a password: offer it, but never preselect a sudo
-      # prompt nobody asked for.
-      T_SUDO["$id"]=1
-      T_TIER["$id"]=review
-      SCAN_BYTES=-1
-      SCAN_NOTE="Docker runs without the docker group, size known after pruning"
-      return 0
-      ;;
-  esac
+  [[ ${ENGINE_MODE[$engine]} == user ]] || SCAN_SUDO=1
+  if [[ ${ENGINE_MODE[$engine]} == denied ]]; then
+    # Unmeasurable without a password: offer it, but never preselect a sudo
+    # prompt nobody asked for.
+    SCAN_TIER=review
+    SCAN_BYTES=-1
+    SCAN_NOTE="Docker runs without the docker group, size known after pruning"
+    return 0
+  fi
   value=$(awk -F'\t' -v t="$type" '$1 == t { print $2 }' <<<"${ENGINE_DF[$engine]}")
   [[ -n $value ]] || return 1
   SCAN_BYTES=$(si_to_bytes "$value")
 }
 
 scan_docker-build() {
-  engine_reclaimable docker "Build Cache" docker-build
+  engine_reclaimable docker "Build Cache"
 }
 
-docker_cli() {
-  if [[ ${ENGINE_MODE[docker]:-user} == user ]]; then
-    run docker "$@"
-  else
-    run sudo -n docker "$@"
-  fi
+engine_run() {
+  local engine=$1 cmd=()
+  shift
+  [[ ${ENGINE_MODE[$engine]:-} == user ]] || cmd=(sudo -n)
+  run "${cmd[@]}" "$engine" "$@"
 }
 
 clean_docker-build() {
-  docker_cli builder prune -af
+  engine_run docker builder prune -af
 }
 
 scan_docker-images() {
-  engine_reclaimable docker "Images" docker-images
+  engine_reclaimable docker "Images"
 }
 
 clean_docker-images() {
-  docker_cli image prune -af
+  engine_run docker image prune -af
 }
 
 scan_podman-images() {
-  engine_reclaimable podman "Images" podman-images
+  engine_reclaimable podman "Images"
 }
 
 clean_podman-images() {
-  run podman image prune -af
+  engine_run podman image prune -af
 }

@@ -101,7 +101,7 @@ sum_bytes() {
 safe_ids() {
   local id
   for id in "${SCANNED[@]}"; do
-    [[ ${R_STATUS[$id]} == ready && ${T_TIER[$id]} == safe ]] && printf '%s\n' "$id"
+    [[ ${R_STATUS[$id]} == ready && ${R_TIER[$id]} == safe ]] && printf '%s\n' "$id"
   done
   return 0
 }
@@ -123,7 +123,7 @@ row() {
   label=$(pad_right "${T_LABEL[$id]}" 26)
   size=$(color_size "${R_BYTES[$id]}")
   plain=$(size_label "$id")
-  [[ ${T_SUDO[$id]} == 1 ]] && admin=" ${C_YELLOW}sudo${C_RESET}"
+  [[ ${R_SUDO[$id]} == 1 ]] && admin=" ${C_YELLOW}sudo${C_RESET}"
   detail=${R_NOTE[$id]:-${T_SECTION[$id]}}
   room=$((TERM_COLS - 51))
   if ((room < 12)); then
@@ -144,7 +144,7 @@ table_rows() {
   local title=$1 status=$2 tier=$3 mark=$4 id shown=0
   for id in "${RANKED[@]}"; do
     [[ ${R_STATUS[$id]} == "$status" ]] || continue
-    [[ -z $tier || ${T_TIER[$id]} == "$tier" ]] || continue
+    [[ -z $tier || ${R_TIER[$id]} == "$tier" ]] || continue
     ((shown++)) || section "$title"
     if [[ $status == ready ]]; then
       NUMBERED+=("$id")
@@ -179,7 +179,7 @@ default_selection() {
   local id
   SELECTED=()
   for id in "${NUMBERED[@]}"; do
-    if [[ $CLEAN_ALL == 1 || ${T_TIER[$id]} == safe ]]; then
+    if [[ $CLEAN_ALL == 1 || ${R_TIER[$id]} == safe ]]; then
       SELECTED+=("$id")
     fi
   done
@@ -202,8 +202,8 @@ apply_filters() {
 pick_label() {
   local index=$1 id=$2
   printf '%2d  %s %9s' "$index" "$(pad_right "${T_LABEL[$id]}" 26)" "$(size_label "$id")"
-  [[ ${T_SUDO[$id]} == 1 ]] && printf '  sudo'
-  [[ ${T_TIER[$id]} == review ]] && printf '  review'
+  [[ ${R_SUDO[$id]} == 1 ]] && printf '  sudo'
+  [[ ${R_TIER[$id]} == review ]] && printf '  review'
   return 0
 }
 
@@ -248,7 +248,7 @@ pick_interactive() {
 ensure_sudo() {
   local id needs=() keep=()
   for id in "${SELECTED[@]}"; do
-    [[ ${T_SUDO[$id]} == 1 ]] && needs+=("${T_LABEL[$id]}")
+    [[ ${R_SUDO[$id]} == 1 ]] && needs+=("${T_LABEL[$id]}")
   done
   ((${#needs[@]})) || return 0
   [[ $DRY_RUN == 1 ]] && return 0
@@ -265,7 +265,7 @@ ensure_sudo() {
   fi
   warn "No admin access. Skipping $(join_by ", " "${needs[@]}")."
   for id in "${SELECTED[@]}"; do
-    [[ ${T_SUDO[$id]} == 1 ]] || keep+=("$id")
+    [[ ${R_SUDO[$id]} == 1 ]] || keep+=("$id")
   done
   SELECTED=("${keep[@]}")
 }
@@ -372,15 +372,13 @@ hold() {
   [[ $HOLD == 1 ]] || return 0
   if have omarchy-show-done; then
     omarchy-show-done "$code"
-  elif ((code == 0)); then
-    printf '\n%s' "${C_GREEN}${GLYPH_ON}${C_RESET} Done! Press any key to close..."
-    read -rsn 1 </dev/tty
-    printf '\n'
-  else
-    printf '\n%s' "${C_RED}${GLYPH_ON}${C_RESET} Failed ($code). Press any key to close..."
-    read -rsn 1 </dev/tty
-    printf '\n'
+    return
   fi
+  local message="${C_GREEN}${GLYPH_ON}${C_RESET} Done!"
+  ((code == 0)) || message="${C_RED}${GLYPH_ON}${C_RESET} Failed ($code)."
+  printf '\n%s Press any key to close...' "$message"
+  read -rsn 1 </dev/tty
+  printf '\n'
 }
 
 finish() {
@@ -443,7 +441,7 @@ choose_targets() {
   if [[ $CLEAN_YES == 1 && $CLEAN_ALL == 1 ]]; then
     local id review=()
     for id in "${SELECTED[@]}"; do
-      [[ ${T_TIER[$id]} == review ]] && review+=("${T_LABEL[$id]}")
+      [[ ${R_TIER[$id]} == review ]] && review+=("${T_LABEL[$id]}")
     done
     ((${#review[@]})) && warn "--all --yes includes review items: $(join_by ", " "${review[@]}")"
   fi
@@ -490,14 +488,12 @@ json_scan() {
   local id safe=()
   mapfile -t safe < <(safe_ids)
   ranked_targets | while IFS= read -r id; do
-    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$id" "${T_LABEL[$id]}" "${T_SECTION[$id]}" "${T_TIER[$id]}" \
-      "${T_SUDO[$id]}" "${R_BYTES[$id]}" "${R_STATUS[$id]}" "${R_NOTE[$id]}"
-  done | jq -Rn --argjson safe "$(sum_bytes "${safe[@]}")" --argjson free "$(free_bytes)" \
-    --argjson rootFree "$(free_bytes /)" --arg version "$OMS_VERSION" '
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$id" "${T_LABEL[$id]}" "${T_SECTION[$id]}" "${R_TIER[$id]}" \
+      "${R_SUDO[$id]}" "${R_BYTES[$id]}" "${R_STATUS[$id]}" "${R_NOTE[$id]}"
+  done | jq -Rn --argjson safe "$(sum_bytes "${safe[@]}")" --argjson free "$(free_bytes)" --arg version "$OMS_VERSION" '
     {
       version: $version,
       freeBytes: $free,
-      rootFreeBytes: $rootFree,
       safeBytes: $safe,
       targets: [inputs | split("\t") | {
         id: .[0], label: .[1], section: .[2], tier: .[3], sudo: (.[4] == "1"),

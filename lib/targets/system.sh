@@ -18,7 +18,8 @@ target thumbnails "System" safe 0 "Thumbnail cache" "regenerated on demand"
 paths thumbnails "$CACHE/thumbnails" "$HOME/.thumbnails"
 target trash "System" review 0 "Trash" "files you deleted"
 paths trash "$DATA/Trash/files" "$DATA/Trash/info" "$DATA/Trash/expunged"
-target partial-downloads "System" safe 0 "Unfinished downloads" "browser .crdownload and .part files, untouched for 7+ days and not open"
+PARTIAL_DAYS=7
+target partial-downloads "System" safe 0 "Unfinished downloads" "browser .crdownload and .part files, untouched for $PARTIAL_DAYS+ days and not open"
 target installers "System" review 0 "Old installers" "packages and disk images in Downloads, untouched for $OMS_STALE_DAYS+ days"
 
 scan_pacman() {
@@ -100,13 +101,26 @@ downloads_dir() {
   printf '%s' "$dir"
 }
 
-scan_installers() {
+# Files directly in Downloads that match the find tests given.
+downloads_find() {
   local dir
   dir=$(downloads_dir)
-  [[ -d $dir ]] || return 1
-  mapfile -t INSTALLERS < <(find "$dir" -maxdepth 1 -type f \
-    \( -name '*.deb' -o -name '*.rpm' -o -name '*.pkg.tar.*' -o -name '*.iso' -o -name '*.dmg' \
-    -o -name '*.exe' -o -name '*.msi' \) -mtime +"$OMS_STALE_DAYS" -ctime +"$OMS_STALE_DAYS" 2>/dev/null)
+  [[ -d $dir ]] || return 0
+  find "$dir" -maxdepth 1 -type f "$@" 2>/dev/null
+}
+
+# Whether one file still matches the find tests it was picked by.
+still_found() {
+  local file=$1
+  shift
+  [[ -n $(find "$file" -maxdepth 0 -type f "$@" 2>/dev/null) ]]
+}
+
+INSTALLER_TESTS=(\( -name '*.deb' -o -name '*.rpm' -o -name '*.pkg.tar.*' -o -name '*.iso' -o -name '*.dmg'
+  -o -name '*.exe' -o -name '*.msi' \) -mtime +"$OMS_STALE_DAYS" -ctime +"$OMS_STALE_DAYS")
+
+scan_installers() {
+  mapfile -t INSTALLERS < <(downloads_find "${INSTALLER_TESTS[@]}")
   ((${#INSTALLERS[@]})) || return 1
   SCAN_BYTES=$(size_of "${INSTALLERS[@]}")
   local names=("${INSTALLERS[@]##*/}")
@@ -116,7 +130,7 @@ scan_installers() {
 clean_installers() {
   local file failed=0
   for file in "${INSTALLERS[@]}"; do
-    if [[ -z $(find "$file" -maxdepth 0 -type f -mtime +"$OMS_STALE_DAYS" -ctime +"$OMS_STALE_DAYS" 2>/dev/null) ]]; then
+    if ! still_found "$file" "${INSTALLER_TESTS[@]}"; then
       oplog "SKIPPED $file, changed since the scan"
       continue
     fi
@@ -126,26 +140,16 @@ clean_installers() {
 }
 
 PARTIALS=()
-
-partial_open() {
-  have fuser || return 0
-  fuser -s -- "$1" 2>/dev/null
-}
-
-stale_partials() {
-  local dir file
-  dir=$(downloads_dir)
-  [[ -d $dir ]] || return 0
-  while IFS= read -r -d '' file; do
-    partial_open "$file" && continue
-    printf '%s\n' "$file"
-  done < <(find "$dir" -maxdepth 1 -type f \( -name '*.crdownload' -o -name '*.part' \) -mtime +7 -print0 2>/dev/null)
-}
+PARTIAL_TESTS=(\( -name '*.crdownload' -o -name '*.part' \) -mtime +"$PARTIAL_DAYS")
 
 scan_partial-downloads() {
   # Without fuser an open download cannot be told apart, so offer nothing.
   have fuser || return 1
-  mapfile -t PARTIALS < <(stale_partials)
+  local file
+  PARTIALS=()
+  while IFS= read -r file; do
+    fuser -s -- "$file" 2>/dev/null || PARTIALS+=("$file")
+  done < <(downloads_find "${PARTIAL_TESTS[@]}")
   ((${#PARTIALS[@]})) || return 1
   SCAN_BYTES=$(size_of "${PARTIALS[@]}")
   ((SCAN_BYTES > 0)) || SCAN_BYTES=4096
@@ -154,10 +158,9 @@ scan_partial-downloads() {
 }
 
 clean_partial-downloads() {
-  local file current=() failed=0
-  mapfile -t current < <(stale_partials)
+  local file failed=0
   for file in "${PARTIALS[@]}"; do
-    if ! in_list "$file" "${current[@]}"; then
+    if ! still_found "$file" "${PARTIAL_TESTS[@]}" || fuser -s -- "$file" 2>/dev/null; then
       oplog "SKIPPED $file, opened or changed since the scan"
       continue
     fi

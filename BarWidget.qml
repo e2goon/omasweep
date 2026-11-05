@@ -34,6 +34,8 @@ BarWidget {
   // omarchy update refuses to run with less than 10 GiB free on /.
   readonly property real updateFloorBytes: 10 * 1073741824
   readonly property bool lowSpace: rootFreeBytes >= 0 && rootFreeBytes < updateFloorBytes
+  readonly property string lowSpaceText: "Only " + humanSize(rootFreeBytes) + " free on /, omarchy update needs "
+    + humanSize(updateFloorBytes)
 
   readonly property bool opened: popupOpen
 
@@ -75,7 +77,6 @@ BarWidget {
       targets = result.targets || []
       safeBytes = Number(result.safeBytes || 0)
       freeBytes = Number(result.freeBytes || 0)
-      if (result.rootFreeBytes !== undefined) rootFreeBytes = Number(result.rootFreeBytes)
       failed = false
       scanned = true
       lastScanAt = Date.now()
@@ -84,19 +85,15 @@ BarWidget {
     }
   }
 
-  function shellQuote(value) {
-    return "'" + String(value).replace(/'/g, "'\\''") + "'"
-  }
-
   // Omarchy's floating-terminal launcher loads the current gum theme, shows the
   // logo, and ends with its Done/Failed prompt for oms's exit code. Older
   // installs without it get a plain terminal and oms holds the window itself.
   function launch(args) {
-    var argv = [omsPath, "clean"].concat(args)
+    var command = [omsPath, "clean"].concat(args).map(Util.shellQuote).join(" ")
     var script = 'if command -v omarchy-launch-floating-terminal-with-presentation >/dev/null; then ' +
-      'exec omarchy-launch-floating-terminal-with-presentation "$1"; fi; shift; ' +
-      'exec setsid uwsm-app -- xdg-terminal-exec --app-id=org.omarchy.terminal --title=omasweep -e "$@" --hold'
-    Quickshell.execDetached(["bash", "-lc", script, "bash", argv.map(shellQuote).join(" ")].concat(argv))
+      'exec omarchy-launch-floating-terminal-with-presentation "$1"; fi; ' +
+      'exec setsid uwsm-app -- xdg-terminal-exec --app-id=org.omarchy.terminal --title=omasweep -e bash -c "$1 --hold"'
+    Quickshell.execDetached(["bash", "-lc", script, "bash", command])
     popupOpen = false
   }
 
@@ -117,16 +114,12 @@ BarWidget {
 
   Timer {
     interval: root.refreshIntervalMin * 60000
-    running: root.showSize
-    repeat: true
-    onTriggered: root.scan()
-  }
-
-  Timer {
-    interval: root.refreshIntervalMin * 60000
     running: true
     repeat: true
-    onTriggered: if (!freeProc.running) freeProc.running = true
+    onTriggered: {
+      if (!freeProc.running) freeProc.running = true
+      if (root.showSize) root.scan()
+    }
   }
 
   Process {
@@ -161,8 +154,7 @@ BarWidget {
     bar: root.bar
     text: root.showSize && !root.vertical && root.scanned && root.safeBytes > 0 ? "󰃢 " + root.compactSize(root.safeBytes) : "󰃢"
     active: root.lowSpace
-    tooltipText: root.lowSpace
-      ? "Only " + root.humanSize(root.rootFreeBytes) + " free, omarchy update needs 10 GB"
+    tooltipText: root.lowSpace ? root.lowSpaceText
       : root.scanned ? root.humanSize(root.safeBytes) + " safe to sweep" : "omasweep"
     onPressed: function(b) { if (b === Qt.LeftButton) root.toggle() }
   }
@@ -253,7 +245,7 @@ BarWidget {
       Text {
         visible: root.lowSpace
         width: parent.width
-        text: "Only " + root.humanSize(root.rootFreeBytes) + " free on /. omarchy update needs at least 10 GB."
+        text: root.lowSpaceText
         color: root.bar.urgent
         font.family: root.bar.fontFamily
         font.pixelSize: Style.font.bodySmall

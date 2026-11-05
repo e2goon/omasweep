@@ -29,7 +29,7 @@ target poetry "Developer tools" safe 0 "Poetry cache" "downloaded again on insta
 paths poetry "$CACHE/pypoetry/cache" "$CACHE/pypoetry/artifacts"
 
 target go-build "Developer tools" safe 0 "Go build cache" "rebuilt on next build" "go"
-paths go-build "$CACHE/go-build"
+paths go-build "${GOCACHE:-$CACHE/go-build}"
 target go-mod "Developer tools" review 0 "Go module cache" "every module, downloaded again on build" "go"
 target cargo "Developer tools" safe 0 "Cargo download cache" "crate archives, sources stay" "cargo rustc"
 paths cargo "$HOME/.cargo/registry/cache"
@@ -87,11 +87,7 @@ clean_mise() {
 }
 
 clean_mise-cache() {
-  if have mise && ! protected_inside "$CACHE/mise"; then
-    run mise cache clear
-  else
-    clean_paths mise-cache
-  fi
+  tool_or_paths mise-cache "$CACHE/mise" mise cache clear
 }
 
 OLD_VERSIONS=()
@@ -137,11 +133,7 @@ clean_pnpm-store() {
 }
 
 clean_uv() {
-  if have uv && ! protected_inside "$CACHE/uv"; then
-    run uv cache prune
-  else
-    clean_paths uv
-  fi
+  tool_or_paths uv "$CACHE/uv" uv cache prune
 }
 
 go_mod_dir() {
@@ -168,17 +160,9 @@ clean_go-mod() {
 }
 
 clean_go-build() {
-  if have go && ! protected_inside "$CACHE/go-build" && [[ $(go env GOCACHE 2>/dev/null) == "$CACHE/go-build" ]]; then
-    run go clean -cache
-  else
-    clean_paths go-build
-  fi
+  tool_or_paths go-build "${GOCACHE:-$CACHE/go-build}" go clean -cache
 }
 
 clean_gh() {
-  if have gh && ! protected_inside "$CACHE/gh"; then
-    run gh config clear-cache
-  else
-    clean_paths gh
-  fi
+  tool_or_paths gh "$CACHE/gh" gh config clear-cache
 }

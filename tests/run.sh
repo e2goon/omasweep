@@ -88,11 +88,7 @@ else
 fi
 EOF
   stub pacman <<'EOF'
-case $1 in
-  -Qdtq) printf "orphan-a\norphan-b\n" ;;
-  -Qi) shift; for p; do printf "Name            : %s\nInstalled Size  : 2.00 MiB\n\n" "$p"; done ;;
-  *) echo "pacman $*" >>"$OMS_TEST_CALLS" ;;
-esac
+echo "pacman $*" >>"$OMS_TEST_CALLS"
 EOF
   stub journalctl <<'EOF'
 echo "journalctl $*" >>"$OMS_TEST_CALLS"
@@ -316,8 +312,6 @@ check "only the mise version no config needs is counted" target_is mise '.bytes 
 check "scan leaves no temporary files behind" test -z "$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'omasweep.*' -newer "$CALLS" 2>/dev/null)"
 check "docker sizes come from docker system df" jq -e '[.targets[] | select(.id == "docker-build" or .id == "docker-images") | .bytes] == [2000000000, 1500000000]' <<<"$json"
 check "unused docker images need review" target_is docker-images '.tier == "review"'
-check "orphans are left to omarchy update" jq -e '[.targets[] | select(.id == "orphans")] | length == 0' <<<"$json"
-check "scan reports free space on / for the update floor" jq -e '.rootFreeBytes | type == "number"' <<<"$json"
 check "Electron apps are discovered from ~/.config" target_is app-caches '.note | contains("Obsidian")'
 check "an app holding its SingletonLock is skipped" target_is app-caches '.note | contains("skipping open: Busy App")'
 check "an installer with an old mtime but a fresh ctime is not offered" jq -e '[.targets[] | select(.id == "installers")] | length == 0' <<<"$json"

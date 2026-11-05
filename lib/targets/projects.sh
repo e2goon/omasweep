@@ -69,6 +69,19 @@ project_active() {
     changed_recently "${dir%/*}" -maxdepth 3 \( "${ARTIFACT_MATCH[@]}" \) -prune -o
 }
 
+SKIP_REASON=""
+
+artifact_removable() {
+  if project_active "$1"; then
+    SKIP_REASON="the project changed recently"
+    return 1
+  fi
+  if git_tracked "$1"; then
+    SKIP_REASON="git tracks files in it"
+    return 1
+  fi
+}
+
 scan_project-artifacts() {
   local roots=() root dir names=() kinds=()
   IFS=: read -r -a roots <<<"$OMS_PROJECT_DIRS"
@@ -79,8 +92,7 @@ scan_project-artifacts() {
       [[ ${dir%/*} == "$HOME" ]] && continue
       path_covered "$dir" && continue
       artifact_kind "$dir" || continue
-      project_active "$dir" && continue
-      git_tracked "$dir" && continue
+      artifact_removable "$dir" || continue
       ARTIFACTS+=("$dir")
     done < <(find "$root" -maxdepth 6 -type d \( "${ARTIFACT_MATCH[@]}" \) -prune -print0 2>/dev/null)
   done
@@ -99,8 +111,8 @@ scan_project-artifacts() {
 clean_project-artifacts() {
   local dir failed=0
   for dir in "${ARTIFACTS[@]}"; do
-    if project_active "$dir" || git_tracked "$dir"; then
-      oplog "SKIPPED $dir, changed since the scan"
+    if ! artifact_removable "$dir"; then
+      oplog "SKIPPED $dir, $SKIP_REASON"
       continue
     fi
     remove_path "$dir" || failed=1
