@@ -49,7 +49,9 @@ you can run it from any terminal. `omarchy plugin update io.github.e2goon.omaswe
 </p>
 
 The widget shows how much can be swept safely and the largest items. **Sweep** and **Preview**
-open `oms` in Omarchy's floating terminal, where you pick and confirm every item.
+open `oms` in Omarchy's floating terminal, where you pick and confirm every item. When `/` has
+less than 10 GB free, the space `omarchy update` needs before it will run, the icon turns to the
+urgent color and the popup says so. On a vertical bar the widget shows only its icon.
 
 ### CLI only
 
@@ -111,12 +113,18 @@ Only targets that exist on your machine show up. Run `oms scan` to see them with
   logs, crash dumps, and tool versions no config refers to. The only cost is a re-download or a
   rebuild. They are preselected.
 - **Review** targets cost something noticeable or may hold things you want: Trash, offline music,
-  AI models, shader caches (games stutter while they rebuild), project dependencies, orphaned
-  packages, and container images. They are listed but stay opt-in.
+  AI models, shader caches (games stutter while they rebuild), project dependencies, and
+  container images. They are listed but stay opt-in.
 - **Never** touched: logins, cookies, history, settings, local storage, mail, game saves, Wine
   prefixes, Steam `compatdata`, Docker volumes and containers, project sources, the Maven
   repository (it can hold artifacts you built locally), NuGet packages, and Ollama models
   (use `ollama rm`).
+- Also never touched on Omarchy: browser Service Worker storage (Omarchy web apps share the
+  Chromium profile), AI agent sessions and worktrees (`~/.claude`, `~/.codex`, opencode data; the
+  `omarchy.agents` widget reads them), Superwhisper recordings and models, cloud CLI credentials
+  (`~/.aws`), `~/Work/tries` experiments as a whole, AppImages, Omarchy's own state, and
+  snapshots.
+- Orphaned packages are left to `omarchy update`, which removes them on every update.
 - When a tool has its own cleanup command, omasweep calls it instead of deleting the tool's data.
 - Caches of running apps are skipped. Chromium-based browsers and Electron apps are detected by
   the `SingletonLock` in their profile, Firefox-based browsers by the profile `lock`, Flatpak apps
@@ -129,13 +137,13 @@ Only targets that exist on your machine show up. Run `oms scan` to see them with
 
 | ID | What | Tier | How |
 | --- | --- | --- | --- |
-| `pacman` | Old package versions | safe, sudo | `paccache -rk2` and `paccache -ruk0` |
+| `pacman` | Cached versions of removed packages, plus versions past two (`omarchy update` already prunes those) | safe, sudo | `paccache -rk2` and `paccache -ruk0` |
 | `pacman-downloads` | `download-*` folders an interrupted update left in the pacman cache | safe, sudo | remove them |
 | `journal` | Archived journal files older than four weeks | safe, sudo | `journalctl --vacuum-time=4weeks` |
 | `coredumps` | `systemd-coredump` archive | safe, sudo | delete files in `/var/lib/systemd/coredump` |
 | `flatpak-unused` | Flatpak runtimes no installed app needs | safe, sudo | `flatpak uninstall --unused` (user and system) |
 | `thumbnails` | Thumbnail cache | safe | empty `~/.cache/thumbnails` |
-| `orphans` | Packages installed as dependencies that nothing needs | review, sudo | `pacman -Rns` on `pacman -Qdtq` |
+| `partial-downloads` | `.crdownload` and `.part` files in Downloads untouched for 7 days and not open (needs `fuser`) | safe | remove the files |
 | `trash` | Trash | review | empty `~/.local/share/Trash` |
 | `installers` | `.deb`, `.rpm`, `.pkg.tar.*`, `.iso`, `.dmg`, `.exe`, `.msi` in Downloads untouched for 30 days | review | remove the files |
 
@@ -145,6 +153,11 @@ Only targets that exist on your machine show up. Run `oms scan` to see them with
 | --- | --- | --- | --- |
 | `docker-build` | Docker build cache | safe | `docker builder prune -af` |
 | `docker-images` | Every image no container uses, including ones you pulled on purpose | review | `docker image prune -af` |
+| `docker-buildx` | Local buildx cache exported with `--cache-to type=local` | safe | empty `~/.docker/buildx/cache` |
+
+Omarchy 4.5 keeps your user out of the `docker` group, so Docker runs through `sudo`. When sudo
+needs no password at that moment, omasweep measures and prunes through `sudo -n docker`.
+Otherwise the Docker rows show an unknown size, ask for sudo, and stay opt-in.
 | `podman-images` | The same for Podman | review | `podman image prune -af` |
 
 ### Developer tools
@@ -158,11 +171,13 @@ Only targets that exist on your machine show up. Run `oms scan` to see them with
 | `npm`, `pnpm`, `yarn`, `bun`, `deno`, `corepack` | JavaScript package caches | safe | empty the cache folders |
 | `pnpm-store` | Store packages no project links to | safe | `pnpm store prune` |
 | `uv`, `pip`, `poetry` | Python package caches | safe | `uv cache prune`, empty the others |
-| `go-build` | Go build cache | safe | empty `~/.cache/go-build` |
+| `go-build` | Go build cache | safe | `go clean -cache` |
 | `cargo`, `rustup` | Crate archives and rustup downloads (sources and toolchains stay) | safe | empty the folders |
 | `gradle` | Gradle build cache and daemon logs (downloaded dependencies stay) | safe | empty the folders |
 | `composer`, `ruby`, `dotnet`, `beam`, `jvm-tools`, `zig`, `ccache`, `opam`, `android` | Composer, RubyGems and Bundler, NuGet HTTP, Hex and rebar3, Coursier, Zig, ccache, opam, and Android build caches | safe | empty the cache folders |
-| `tool-caches` | node-gyp, Electron, TypeScript, Vite, webpack, ESLint, Prettier, Ruff, mypy, pre-commit | safe | empty the cache folders |
+| `tool-caches` | node-gyp, Electron, TypeScript, Vite, webpack, ESLint, Prettier, Ruff, mypy, pre-commit, Prisma, pyenv downloads | safe | empty the cache folders |
+| `gh` | GitHub CLI API cache | safe | `gh config clear-cache` |
+| `cloud-cli` | kubectl discovery cache, gcloud and Azure CLI logs (credentials and configs stay) | safe | empty the folders |
 | `go-mod` | Go module cache | review | `go clean -modcache` |
 | `test-browsers` | Playwright, Puppeteer, and Cypress browsers | review | empty the cache folders |
 | `jetbrains` | JetBrains IDE caches and indexes | review | empty `~/.cache/JetBrains` |
@@ -173,6 +188,7 @@ Only targets that exist on your machine show up. Run `oms scan` to see them with
 | --- | --- | --- | --- |
 | `chromium`, `chrome`, `edge`, `brave`, `vivaldi`, `opera` | `~/.cache/<browser>` plus code, GPU, and shader caches inside the profile | safe | empty the cache folders |
 | `firefox`, `zen`, `librewolf` | `~/.cache/<browser>` | safe | empty the cache folder |
+| `browser-ai-models` | On-device AI models in Chrome, Edge, Chromium, and Brave profiles (`OptGuideOnDeviceModel`), often several GB | review | empty the model folders |
 
 ### Apps
 
@@ -199,17 +215,21 @@ Only targets that exist on your machine show up. Run `oms scan` to see them with
 | `huggingface` | Hugging Face hub cache | review | empty the cache folders |
 | `ml-models` | PyTorch hub and Whisper models | review | empty the cache folders |
 | `lmstudio` | LM Studio models | review | empty the models folder |
+| `opencode` | OpenCode provider packages and tools (sessions stay) | safe | empty `~/.cache/opencode` |
 
 ### Projects
 
 | ID | What | Tier | How |
 | --- | --- | --- | --- |
-| `project-artifacts` | `node_modules`, `.next`, `.nuxt`, `.svelte-kit`, `.turbo`, `.parcel-cache`, `.angular`, Rust and Maven `target`, Python `.venv`/`venv`, `.gradle`, `.dart_tool`, and Composer `vendor` in projects untouched for 30 days | review | remove the folders |
+| `project-artifacts` | `node_modules`, `.next`, `.nuxt`, `.output`, `.svelte-kit`, `.astro`, `.expo`, `.turbo`, `.parcel-cache`, `.angular`, `coverage`, Rust and Maven `target`, Python `.venv`/`venv`, `.tox`, `.nox`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`, `.gradle`, `.cxx`, `.dart_tool`, Zig `.zig-cache`/`zig-out`, and Composer `vendor` in projects untouched for 30 days | review | remove the folders |
 
 A folder only counts when its project marker sits next to it (`package.json`, `Cargo.toml`,
 `pyvenv.cfg`, `composer.json`, ...). Only the outermost match is taken, folders directly in
 `$HOME` are ignored, `target` folders with a `deploy` directory (Solana keys) are kept, and Go or
-Rails `vendor` folders are left alone. Each project is checked again right before removal.
+Rails `vendor` folders are left alone. A folder git tracks files in is kept whatever its name,
+so a committed `coverage` report or vendored code stays. `dist`, `build`, `bin`, and `obj` are
+never taken, since they too often hold committed output. Each project is checked again right
+before removal.
 
 Btrfs snapshots are not deleted; if a sweep frees less than expected on a snapper-managed root,
 omasweep tells you to review `sudo snapper list`.
@@ -266,7 +286,7 @@ tests/run.sh
 
 - checks syntax, runs `shellcheck` when installed (`uvx --from shellcheck-py shellcheck` works
   too), runs `qmllint` against the Omarchy shell modules, and validates the plugin manifest
-- replaces `sudo`, `paccache`, `pacman`, `journalctl`, `mise`, `docker`, `uv`, `go`, `pnpm`,
+- replaces `sudo`, `paccache`, `pacman`, `journalctl`, `mise`, `docker`, `uv`, `go`, `gh`, `fuser`, `pnpm`,
   `flatpak`, and `ps` with stubs that record their arguments, so every cleanup command is checked
   exactly
 - sweeps a throwaway home directory and confirms what is removed and what survives: whitelisted
