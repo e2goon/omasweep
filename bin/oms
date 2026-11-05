@@ -63,12 +63,23 @@ on_interrupt() {
   exit 130
 }
 
+# Targets that existed once. Scripts naming them keep working.
+declare -A RETIRED_IDS=(
+  [orphans]="omarchy update removes orphaned packages on every update"
+)
+
 target_list() {
-  local option=$1 value=$2 id
+  local option=$1 value=$2 id ids=()
   [[ -n $value ]] || die "$option needs at least one target ID (see oms scan)"
-  IFS=, read -r -a TARGET_LIST <<<"$value"
-  for id in "${TARGET_LIST[@]}"; do
+  IFS=, read -r -a ids <<<"$value"
+  TARGET_LIST=()
+  for id in "${ids[@]}"; do
+    if [[ -n $id && -n ${RETIRED_IDS[$id]:-} ]]; then
+      note "Ignoring retired target '$id': ${RETIRED_IDS[$id]}"
+      continue
+    fi
     [[ -n $id && -n ${T_LABEL[$id]:-} ]] || die "Unknown target in $option: '$id' (see oms scan)"
+    TARGET_LIST+=("$id")
   done
 }
 

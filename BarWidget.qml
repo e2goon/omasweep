@@ -41,6 +41,7 @@ BarWidget {
 
   function open() {
     popupOpen = true
+    if (!freeProc.running) freeProc.running = true
     if (Date.now() - lastScanAt > 60000) scan()
   }
   function close() { popupOpen = false }

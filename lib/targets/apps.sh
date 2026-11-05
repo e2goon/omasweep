@@ -50,3 +50,12 @@ discover_flatpak_caches() {
 }
 
 before_scan discover_app_caches discover_flatpak_caches
+
+# Qt Quick apps (Omarchy's own omawrite, omacalc, hype, monologue, omacut, and
+# others) keep compiled QML and shader caches they rebuild on the next start.
+target qt-caches "Apps" safe 0 "Qt app caches" "compiled QML and shader caches, rebuilt on next start"
+paths qt-caches "$CACHE"/*/qmlcache "$CACHE"/*/*/qmlcache \
+  "$CACHE"/*/qtshadercache-* "$CACHE"/*/*/qtshadercache-* \
+  "$CACHE"/*/qtpipelinecache-* "$CACHE"/*/*/qtpipelinecache-*
+target zed "Apps" safe 0 "Zed caches and logs" "temp files, logs, and its npm cache, extensions and settings stay" "zed zeditor zed-editor"
+paths zed "$CACHE/zed" "$DATA/zed/logs" "$DATA/zed/node/cache" "$DATA/zed/node/node-v*/cache"

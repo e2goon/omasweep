@@ -124,7 +124,8 @@ Only targets that exist on your machine show up. Run `oms scan` to see them with
   `omarchy.agents` widget reads them), Superwhisper recordings and models, cloud CLI credentials
   (`~/.aws`), `~/Work/tries` experiments as a whole, AppImages, Omarchy's own state, and
   snapshots.
-- Orphaned packages are left to `omarchy update`, which removes them on every update.
+- Orphaned packages are left to `omarchy update`, which removes them on every update. The old
+  `orphans` ID is still accepted by `--only` and `--skip` and is ignored with a note.
 - When a tool has its own cleanup command, omasweep calls it instead of deleting the tool's data.
 - Caches of running apps are skipped. Chromium-based browsers and Electron apps are detected by
   the `SingletonLock` in their profile, Firefox-based browsers by the profile `lock`, Flatpak apps
@@ -153,12 +154,12 @@ Only targets that exist on your machine show up. Run `oms scan` to see them with
 | --- | --- | --- | --- |
 | `docker-build` | Docker build cache | safe | `docker builder prune -af` |
 | `docker-images` | Every image no container uses, including ones you pulled on purpose | review | `docker image prune -af` |
-| `docker-buildx` | Local buildx cache exported with `--cache-to type=local` | safe | empty `~/.docker/buildx/cache` |
+| `podman-images` | The same for Podman | review | `podman image prune -af` |
 
 Omarchy 4.5 keeps your user out of the `docker` group, so Docker runs through `sudo`. When sudo
 needs no password at that moment, omasweep measures and prunes through `sudo -n docker`.
-Otherwise the Docker rows show an unknown size, ask for sudo, and stay opt-in.
-| `podman-images` | The same for Podman | review | `podman image prune -af` |
+Otherwise, if Docker has stored data, the Docker rows show an unknown size, ask for sudo, and stay
+opt-in. A Docker that never ran is not listed, even though Omarchy enables its socket.
 
 ### Developer tools
 
@@ -166,7 +167,7 @@ Otherwise the Docker rows show an unknown size, ask for sudo, and stay opt-in.
 | --- | --- | --- | --- |
 | `mise` | Tool versions no mise config refers to | safe | `mise prune` |
 | `mise-cache` | mise download cache | safe | `mise cache clear` |
-| `ai-cli-versions` | Old Claude Code and Cursor Agent builds, keeping the active one and one previous | safe | remove the older builds |
+| `ai-cli-versions` | Old Claude Code, Cursor Agent, and GitHub Copilot CLI builds, keeping the active one and one previous | safe | remove the older builds |
 | `aur` | yay, paru, and pikaur build clones | safe | empty their cache folders |
 | `npm`, `pnpm`, `yarn`, `bun`, `deno`, `corepack` | JavaScript package caches | safe | empty the cache folders |
 | `pnpm-store` | Store packages no project links to | safe | `pnpm store prune` |
@@ -198,6 +199,8 @@ Otherwise the Docker rows show an unknown size, ask for sudo, and stay opt-in.
 | `flatpak-caches` | `~/.var/app/*/cache` | safe | empty the cache folders |
 | `spotify` | Spotify cache, including songs saved for offline listening | review | empty `~/.cache/spotify` |
 | `kdenlive` | Kdenlive proxy clips and previews | review | empty `~/.cache/kdenlive` |
+| `qt-caches` | Compiled QML and shader caches of Qt Quick apps, including Omarchy's omawrite, omacalc, hype, monologue, and omacut | safe | empty `qmlcache`, `qtshadercache-*`, `qtpipelinecache-*` |
+| `zed` | Zed temp files, logs, and its npm cache (extensions, languages, and settings stay) | safe | empty the folders |
 | `gpu-shaders` | Mesa, RADV, and NVIDIA shader caches | review | empty the cache folders |
 
 ### Games
@@ -234,6 +237,22 @@ before removal.
 Btrfs snapshots are not deleted; if a sweep frees less than expected on a snapper-managed root,
 omasweep tells you to review `sudo snapper list`.
 
+## After omarchy update
+
+`omarchy update` needs 10 GB free on `/` and refuses to start below that. `oms scan`, `oms clean`,
+and the widget warn when free space drops under it.
+
+Every update also runs `mise up` and pulls new packages, so caches pile up. An optional hook scans
+in the background after each update and sends a notification with a **Sweep** button when more
+than `OMS_NOTIFY_GB` (default 5) can be swept safely. It never deletes anything itself:
+
+```bash
+install -Dm644 ~/.config/omarchy/plugins/io.github.e2goon.omasweep/hooks/post-update \
+  ~/.config/omarchy/hooks/post-update.d/omasweep
+```
+
+Remove that file to turn it off.
+
 ## Whitelist
 
 `oms whitelist` opens `~/.config/omasweep/whitelist`. One entry per line:
@@ -255,6 +274,7 @@ docker-images
 | `OMS_JOURNAL_KEEP` | `4weeks` | Journal age kept by `journalctl --vacuum-time` |
 | `OMS_STALE_DAYS` | `30` | Days without changes before project build output or a downloaded installer counts as stale |
 | `OMS_PROJECT_DIRS` | `~/Projects:~/projects:~/Code:~/code:~/src:~/dev:~/Work:~/work` | Where to look for project build output |
+| `OMS_NOTIFY_GB` | `5` | Safe total, in GB, above which the post-update hook notifies |
 | `NO_COLOR` | unset | Disable colors |
 
 The widget has two settings. `showSize` puts the safe total next to the icon, and

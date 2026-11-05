@@ -52,7 +52,12 @@ artifact_kind() {
 git_tracked() {
   local dir=$1 parent=${1%/*} output
   have git || return 1
-  git -C "$parent" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 1
+  if ! output=$(LC_ALL=C git -C "$parent" rev-parse --is-inside-work-tree 2>&1); then
+    # Outside any repository nothing is tracked. Any other failure (dubious
+    # ownership, a broken .git) is git unable to answer.
+    [[ $output == *"not a git repository"* ]] && return 1
+    return 0
+  fi
   output=$(git -C "$parent" ls-files -- "${dir##*/}" 2>/dev/null) || return 0
   [[ -n $output ]]
 }

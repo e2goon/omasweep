@@ -116,7 +116,8 @@ oms log                     # 지운 것, 건너뛴 것, 실패한 것
   같이 씀), AI 에이전트 세션과 worktree(`~/.claude`, `~/.codex`, opencode 데이터. `omarchy.agents`
   위젯이 읽음), Superwhisper 녹음과 모델, 클라우드 CLI 자격 증명(`~/.aws`), `~/Work/tries` 실험 폴더
   통째, AppImage, Omarchy 자체 상태, 스냅샷.
-- 고아 패키지는 `omarchy update`가 업데이트할 때마다 지우므로 맡겨 둡니다.
+- 고아 패키지는 `omarchy update`가 업데이트할 때마다 지우므로 맡겨 둡니다. 예전 `orphans` ID는
+  `--only`와 `--skip`에서 계속 받아들이며, 안내만 하고 무시합니다.
 - 도구에 자체 정리 명령이 있으면 그 데이터를 직접 지우지 않고 그 명령을 호출합니다.
 - 실행 중인 앱의 캐시는 건너뜁니다. Chromium 계열 브라우저와 Electron 앱은 프로필의 `SingletonLock`,
   Firefox 계열 브라우저는 프로필의 `lock`, Flatpak 앱은 `flatpak ps`, 나머지는 프로세스 이름으로
@@ -144,12 +145,12 @@ oms log                     # 지운 것, 건너뛴 것, 실패한 것
 | --- | --- | --- | --- |
 | `docker-build` | Docker 빌드 캐시 | safe | `docker builder prune -af` |
 | `docker-images` | 컨테이너가 쓰지 않는 모든 이미지(일부러 받아 둔 것 포함) | review | `docker image prune -af` |
-| `docker-buildx` | `--cache-to type=local`로 내보낸 buildx 로컬 캐시 | safe | `~/.docker/buildx/cache` 비우기 |
+| `podman-images` | Podman의 같은 항목 | review | `podman image prune -af` |
 
 Omarchy 4.5는 사용자를 `docker` 그룹에 넣지 않아 Docker를 `sudo`로 씁니다. 그 순간 sudo에 비밀번호가
-필요 없으면 `sudo -n docker`로 크기를 재고 정리합니다. 그렇지 않으면 Docker 항목은 크기 미상으로
-보이고, sudo를 요구하며, 직접 골라야 합니다.
-| `podman-images` | Podman의 같은 항목 | review | `podman image prune -af` |
+필요 없으면 `sudo -n docker`로 크기를 재고 정리합니다. 그렇지 않으면 Docker에 저장된 데이터가 있을 때만
+Docker 항목이 크기 미상으로 보이고, sudo를 요구하며, 직접 골라야 합니다. Omarchy가 소켓을 켜 두더라도
+한 번도 실행하지 않은 Docker는 목록에 나오지 않습니다.
 
 ### 개발 도구
 
@@ -157,7 +158,7 @@ Omarchy 4.5는 사용자를 `docker` 그룹에 넣지 않아 Docker를 `sudo`로
 | --- | --- | --- | --- |
 | `mise` | 어떤 mise 설정도 쓰지 않는 도구 버전 | safe | `mise prune` |
 | `mise-cache` | mise 다운로드 캐시 | safe | `mise cache clear` |
-| `ai-cli-versions` | Claude Code와 Cursor Agent의 옛 빌드(사용 중인 버전과 직전 버전 하나는 남김) | safe | 옛 빌드 삭제 |
+| `ai-cli-versions` | Claude Code, Cursor Agent, GitHub Copilot CLI의 옛 빌드(사용 중인 버전과 직전 버전 하나는 남김) | safe | 옛 빌드 삭제 |
 | `aur` | yay, paru, pikaur 빌드 클론 | safe | 캐시 폴더 비우기 |
 | `npm`, `pnpm`, `yarn`, `bun`, `deno`, `corepack` | JavaScript 패키지 캐시 | safe | 캐시 폴더 비우기 |
 | `pnpm-store` | 어떤 프로젝트도 링크하지 않는 저장소 패키지 | safe | `pnpm store prune` |
@@ -189,6 +190,8 @@ Omarchy 4.5는 사용자를 `docker` 그룹에 넣지 않아 Docker를 `sudo`로
 | `flatpak-caches` | `~/.var/app/*/cache` | safe | 캐시 폴더 비우기 |
 | `spotify` | Spotify 캐시(오프라인 저장한 곡 포함) | review | `~/.cache/spotify` 비우기 |
 | `kdenlive` | Kdenlive 프록시 클립과 미리 보기 | review | `~/.cache/kdenlive` 비우기 |
+| `qt-caches` | Qt Quick 앱의 컴파일된 QML과 셰이더 캐시(Omarchy의 omawrite, omacalc, hype, monologue, omacut 포함) | safe | `qmlcache`, `qtshadercache-*`, `qtpipelinecache-*` 비우기 |
+| `zed` | Zed 임시 파일, 로그, npm 캐시(확장, 언어 서버, 설정은 남김) | safe | 폴더 비우기 |
 | `gpu-shaders` | Mesa, RADV, NVIDIA 셰이더 캐시 | review | 캐시 폴더 비우기 |
 
 ### 게임
@@ -224,6 +227,22 @@ Omarchy 4.5는 사용자를 `docker` 그룹에 넣지 않아 Docker를 `sudo`로
 Btrfs 스냅샷은 지우지 않습니다. snapper가 관리하는 루트에서 기대보다 적게 비워졌다면 `sudo snapper
 list`를 확인해 보라고 알려 줍니다.
 
+## omarchy update 이후
+
+`omarchy update`는 `/`에 10 GB 이상 비어 있어야 시작합니다. 여유 공간이 그보다 적으면 `oms scan`,
+`oms clean`, 위젯이 알려 줍니다.
+
+업데이트할 때마다 `mise up`이 돌고 새 패키지를 받으므로 캐시가 쌓입니다. 선택 사항인 훅을 설치하면
+업데이트가 끝난 뒤 백그라운드에서 스캔하고, 안전하게 정리할 양이 `OMS_NOTIFY_GB`(기본 5)를 넘으면
+**Sweep** 버튼이 달린 알림을 보냅니다. 훅이 직접 지우는 것은 없습니다.
+
+```bash
+install -Dm644 ~/.config/omarchy/plugins/io.github.e2goon.omasweep/hooks/post-update \
+  ~/.config/omarchy/hooks/post-update.d/omasweep
+```
+
+끄려면 그 파일을 지우면 됩니다.
+
 ## 화이트리스트
 
 `oms whitelist`는 `~/.config/omasweep/whitelist`를 엽니다. 한 줄에 하나씩 적습니다.
@@ -245,6 +264,7 @@ docker-images
 | `OMS_JOURNAL_KEEP` | `4weeks` | `journalctl --vacuum-time`으로 남길 저널 기간 |
 | `OMS_STALE_DAYS` | `30` | 프로젝트 빌드 결과물이나 내려받은 설치 파일을 오래된 것으로 보는 날 수 |
 | `OMS_PROJECT_DIRS` | `~/Projects:~/projects:~/Code:~/code:~/src:~/dev:~/Work:~/work` | 프로젝트 빌드 결과물을 찾을 위치 |
+| `OMS_NOTIFY_GB` | `5` | post-update 훅이 알림을 보내는 안전 정리량 기준(GB) |
 | `NO_COLOR` | 없음 | 색 끄기 |
 
 위젯에는 설정이 두 개 있습니다. `showSize`는 아이콘 옆에 안전하게 정리할 수 있는 총량을 보여 주고,

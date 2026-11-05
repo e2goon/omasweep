@@ -2,18 +2,22 @@
 
 target docker-build "Containers" safe 0 "Docker build cache" "docker builder prune"
 target docker-images "Containers" review 0 "Unused Docker images" "every image no container uses, pulled again when needed"
-target docker-buildx "Containers" safe 0 "Docker buildx local cache" "cache exported with --cache-to type=local" "docker-buildx"
-paths docker-buildx "$HOME/.docker/buildx/cache"
 target podman-images "Containers" review 0 "Unused Podman images" "every image no container uses, pulled again when needed"
 
 declare -A ENGINE_DF ENGINE_JOB ENGINE_OUT ENGINE_MODE
 
+DOCKER_SOCKET=/run/docker.sock
 DOCKER_ROOT=/var/lib/docker
-[[ ${OMS_TEST:-} == 1 ]] && DOCKER_ROOT=${OMS_DOCKER_ROOT:-$DOCKER_ROOT}
+if [[ ${OMS_TEST:-} == 1 ]]; then
+  DOCKER_SOCKET=${OMS_DOCKER_SOCKET:-$DOCKER_SOCKET}
+  DOCKER_ROOT=${OMS_DOCKER_ROOT:-$DOCKER_ROOT}
+fi
 
 # Omarchy 4.5 leaves the user out of the docker group, so the plain CLI cannot
 # reach the daemon. The first line says how it was reached: as the user,
-# through sudo that needs no password right now, or not at all.
+# through sudo that needs no password right now, or not at all. "Not at all"
+# is only reported for a socket the user cannot write in front of a daemon
+# that has stored data; Omarchy enables the socket even where Docker never ran.
 engine_df() {
   local engine=$1 cmd=("$1")
   if timeout 5 "$engine" info >/dev/null 2>&1; then
@@ -22,7 +26,7 @@ engine_df() {
     cmd=(sudo -n docker)
     printf 'mode\tsudo\n'
   else
-    [[ $engine == docker && -d $DOCKER_ROOT ]] && printf 'mode\tdenied\n'
+    [[ $engine == docker && -S $DOCKER_SOCKET && ! -w $DOCKER_SOCKET && -d $DOCKER_ROOT ]] && printf 'mode\tdenied\n'
     return 0
   fi
   timeout 20 "${cmd[@]}" system df --format '{{.Type}}\t{{.Reclaimable}}' 2>/dev/null

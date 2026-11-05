@@ -3,7 +3,7 @@
 target mise "Developer tools" safe 0 "Old mise tool versions" "mise prune" "mise"
 target mise-cache "Developer tools" safe 0 "mise download cache" "mise cache clear" "mise"
 paths mise-cache "$CACHE/mise"
-target ai-cli-versions "Developer tools" safe 0 "Old AI CLI versions" "keeps the active and one previous version" "claude cursor-agent"
+target ai-cli-versions "Developer tools" safe 0 "Old AI CLI versions" "keeps the active and one previous version" "claude cursor-agent copilot"
 target aur "Developer tools" safe 0 "AUR build cache" "yay, paru, and pikaur clones" "yay paru pikaur makepkg"
 paths aur "$CACHE/yay" "$CACHE/paru" "$CACHE/pikaur"
 
@@ -29,7 +29,6 @@ target poetry "Developer tools" safe 0 "Poetry cache" "downloaded again on insta
 paths poetry "$CACHE/pypoetry/cache" "$CACHE/pypoetry/artifacts"
 
 target go-build "Developer tools" safe 0 "Go build cache" "rebuilt on next build" "go"
-paths go-build "${GOCACHE:-$CACHE/go-build}"
 target go-mod "Developer tools" review 0 "Go module cache" "every module, downloaded again on build" "go"
 target cargo "Developer tools" safe 0 "Cargo download cache" "crate archives, sources stay" "cargo rustc"
 paths cargo "$HOME/.cargo/registry/cache"
@@ -63,7 +62,7 @@ paths tool-caches "$CACHE/node-gyp" "$HOME/.node-gyp" "$CACHE/electron" "$CACHE/
 
 target gh "Developer tools" safe 0 "GitHub CLI cache" "gh config clear-cache" "gh"
 paths gh "$CACHE/gh"
-target cloud-cli "Developer tools" safe 0 "Cloud CLI caches and logs" "kubectl discovery cache, gcloud and Azure logs, credentials stay" "kubectl gcloud az"
+target cloud-cli "Developer tools" safe 0 "Cloud CLI caches and logs" "kubectl discovery cache, gcloud and Azure logs, credentials stay" "kubectl match:gcloud match:azure.cli"
 paths cloud-cli "$HOME/.kube/cache" "$HOME/.kube/http-cache" "$CONFIG/gcloud/logs" "$HOME/.azure/logs"
 
 target test-browsers "Developer tools" review 0 "Test browsers" "Playwright, Puppeteer, Cypress, downloaded again on next run" "match:playwright match:puppeteer Cypress"
@@ -107,6 +106,10 @@ scan_ai-cli-versions() {
   OLD_VERSIONS=()
   old_versions "$DATA/claude/versions" "$HOME/.local/bin/claude"
   old_versions "$DATA/cursor-agent/versions" "$HOME/.local/bin/cursor-agent"
+  local copilot
+  for copilot in "$HOME"/.copilot/pkg/*; do
+    old_versions "$copilot" "$HOME/.local/bin/copilot"
+  done
   ((${#OLD_VERSIONS[@]})) || return 1
   SCAN_BYTES=$(size_of "${OLD_VERSIONS[@]}")
   SCAN_NOTE="$(plural ${#OLD_VERSIONS[@]} version), keeps the active and one previous"
@@ -136,31 +139,55 @@ clean_uv() {
   tool_or_paths uv "$CACHE/uv" uv cache prune
 }
 
-go_mod_dir() {
-  local dir=""
-  have go && dir=$(go env GOMODCACHE 2>/dev/null)
-  printf '%s' "${dir:-$HOME/go/pkg/mod}"
+go_env_dir() {
+  local name=$1 fallback=$2 dir=""
+  have go && dir=$(go env "$name" 2>/dev/null)
+  printf '%s' "${dir:-$fallback}"
 }
 
-scan_go-mod() {
-  local dir
-  dir=$(go_mod_dir)
+go_mod_dir() {
+  go_env_dir GOMODCACHE "$HOME/go/pkg/mod"
+}
+
+go_build_dir() {
+  go_env_dir GOCACHE "$CACHE/go-build"
+}
+
+# Run go from / with the local toolchain, so a go.mod in the current directory
+# can neither pick the toolchain nor make go download one.
+go_clean() {
+  run env -C / GOTOOLCHAIN=local go clean "$@"
+}
+
+go_cache_scan() {
+  local dir=$1
   [[ -d $dir && ! -L $dir ]] && path_safe "$dir" && ! path_covered "$dir" || return 1
   SCAN_BYTES=$(size_of "$dir")
 }
 
-clean_go-mod() {
-  local dir
-  dir=$(go_mod_dir)
+go_cache_clean() {
+  local dir=$1 flag=$2
   if have go && ! protected_inside "$dir"; then
-    run go clean -modcache
+    go_clean "$flag"
   else
     clear_contents "$dir"
   fi
 }
 
+scan_go-mod() {
+  go_cache_scan "$(go_mod_dir)"
+}
+
+clean_go-mod() {
+  go_cache_clean "$(go_mod_dir)" -modcache
+}
+
+scan_go-build() {
+  go_cache_scan "$(go_build_dir)"
+}
+
 clean_go-build() {
-  tool_or_paths go-build "${GOCACHE:-$CACHE/go-build}" go clean -cache
+  go_cache_clean "$(go_build_dir)" -cache
 }
 
 clean_gh() {

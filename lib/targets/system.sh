@@ -148,7 +148,8 @@ scan_partial-downloads() {
   local file
   PARTIALS=()
   while IFS= read -r file; do
-    fuser -s -- "$file" 2>/dev/null || PARTIALS+=("$file")
+    # psmisc fuser treats "--" as a usage error, so pass the absolute path alone.
+    fuser -s "$file" 2>/dev/null || PARTIALS+=("$file")
   done < <(downloads_find "${PARTIAL_TESTS[@]}")
   ((${#PARTIALS[@]})) || return 1
   SCAN_BYTES=$(size_of "${PARTIALS[@]}")
@@ -160,7 +161,7 @@ scan_partial-downloads() {
 clean_partial-downloads() {
   local file failed=0
   for file in "${PARTIALS[@]}"; do
-    if ! still_found "$file" "${PARTIAL_TESTS[@]}" || fuser -s -- "$file" 2>/dev/null; then
+    if ! still_found "$file" "${PARTIAL_TESTS[@]}" || fuser -s "$file" 2>/dev/null; then
       oplog "SKIPPED $file, opened or changed since the scan"
       continue
     fi
